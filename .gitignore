@@ -1,0 +1,23 @@
+# binaries
+electrum-go
+*.exe
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# data and db
+data/
+*.db
+
+# logs
+*.log
+
+# local config variants
+config.local.toml
+config.toml.bak
+
+# OS
+.DS_Store

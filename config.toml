@@ -1,0 +1,66 @@
+# electrum-go Server Configuration
+# ================================
+# This configuration file controls all aspects of the Electrum server.
+# Copy this file to config.toml and modify as needed.
+
+[server]
+# Address and port to listen for Electrum client connections.
+# Use "127.0.0.1:50001" for local-only access (recommended for testing).
+# Use "0.0.0.0:50001" to accept connections from any interface (requires TLS in production).
+listen = "0.0.0.0:50001"
+
+# Maximum number of concurrent client connections.
+# Each connection uses memory for buffers and subscription tracking.
+# Adjust based on available RAM (estimate ~1MB per connection worst case).
+max_connections = 100
+
+# Request timeout for client operations (in seconds).
+# Clients that don't send data within this period are disconnected.
+request_timeout_seconds = 3000
+
+[bitcoin]
+# Bitcoin Core RPC connection settings (TESTNET4).
+rpc_host = "127.0.0.1:48332"
+rpc_user = "electrumgo"
+rpc_pass = "yourpass"
+
+# ZMQ endpoints for real-time notifications.
+# Must match zmqpubrawblock/zmqpubrawtx in bitcoin.conf
+zmq_block_addr = "tcp://127.0.0.1:28332"
+zmq_tx_addr    = "tcp://127.0.0.1:28333"
+
+# --- MAINNET EXAMPLE (commented) ---
+# rpc_host = "127.0.0.1:8332"
+# rpc_user = "electrumgo"
+# rpc_pass = "yourpass"
+# zmq_block_addr = "tcp://127.0.0.1:28332"
+# zmq_tx_addr    = "tcp://127.0.0.1:28333"
+
+[storage]
+# Path to the Pebble database directory.
+# This directory will be created if it doesn't exist.
+db_path = "./data/index.db"
+
+# Maximum reorg depth to keep undo logs for.
+# 144 blocks ≈ 1 day on mainnet.
+max_reorg_depth = 144
+
+[indexer]
+# Block height to start indexing from.
+# -1 = Start from current chain tip (forward-indexing mode, recommended)
+#  0 = Start from genesis (requires non-pruned node)
+# > h = Start from specific height
+start_height > 100000
+
+# How often to save checkpoints during initial sync (in blocks).
+checkpoint_interval = 100
+
+# How often to clean up old undo logs (in blocks).
+undo_prune_interval = 1000
+
+[logging]
+# Log level: "debug", "info", "warn", "error"
+level = "info"
+
+# Whether to log each Electrum RPC request (verbose, useful for debugging)
+log_requests = false

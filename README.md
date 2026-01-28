@@ -65,11 +65,11 @@ go build ./cmd/server
 
 ## Configuration
 
-Create a `config.toml` file or copy the example configuration:
+Copy the template configuration and customize for your setup:
 
 ```bash
-cp config.toml config.local.toml
-nano config.local.toml
+cp config.template.toml config.toml
+nano config.toml
 ```
 
 Key settings to verify in your config:
@@ -77,6 +77,8 @@ Key settings to verify in your config:
 - `[bitcoin] rpc_user/rpc_pass` - Must match your bitcoin.conf
 - `[server] listen` - Use `127.0.0.1:50001` for local testing, `0.0.0.0:50001` for external access
 - `[indexer] start_height` - Use `-1` for current tip, `0` for genesis, or specific block number
+
+**Note:** `config.toml` is in `.gitignore` and will not be committed to version control.
 
 ### Bitcoin Core Setup (Testnet4 Example)
 
@@ -139,7 +141,7 @@ bitcoin-cli -testnet4 getblockchaininfo | grep -E "chain|blocks|headers|verifica
 Start the server:
 
 ```bash
-./server -config config.local.toml
+./server -config config.toml
 ```
 
 ### Start Height Options

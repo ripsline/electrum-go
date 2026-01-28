@@ -49,8 +49,8 @@ max_reorg_depth = 144
 # Block height to start indexing from.
 # -1 = Start from current chain tip (forward-indexing mode, recommended)
 #  0 = Start from genesis (requires non-pruned node)
-# > h = Start from specific height
-start_height > 100000
+#  h = Start from specific height
+start_height = 100000
 
 # How often to save checkpoints during initial sync (in blocks).
 checkpoint_interval = 100

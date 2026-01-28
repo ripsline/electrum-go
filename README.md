@@ -17,22 +17,66 @@ A Go-based Electrum server designed to work with a **pruned Bitcoin Core node**.
 - Batch JSON-RPC support
 - Per-connection write queue (prevents notification corruption)
 
-## Requirements
+## Prerequisites
 
-- Go 1.23+
-- Bitcoin Core with:
-  - RPC enabled
-  - ZMQ rawblock/rawtx enabled
-  - Pruning allowed (txindex not required)
+- Ubuntu 24.04+ (or similar Linux distribution)
+- Bitcoin Core (synced for your target network)
+- Tor (optional, but recommended for privacy)
+- Go 1.25.6 or later
+- Git
+
+## Dependencies
+
+Install required system packages:
+
+```bash
+sudo apt update
+sudo apt install -y git build-essential pkg-config libzmq3-dev
+```
+
+## Install Go
+
+```bash
+cd /tmp
+wget https://go.dev/dl/go1.25.6.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf go1.25.6.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+source ~/.profile
+go version
+```
 
 ## Installation
+
+Clone the repository:
+
 ```bash
+cd ~
+git clone https://github.com/ripsline/electrum-go.git
+cd electrum-go
+```
+
+Build the server:
+
+```bash
+go mod tidy
 go build ./cmd/server
 ```
 
 ## Configuration
 
-Create a `config.toml` file (example coming soon) or see the Bitcoin Core configuration below.
+Create a `config.toml` file or copy the example configuration:
+
+```bash
+cp config.toml config.local.toml
+nano config.local.toml
+```
+
+Key settings to verify in your config:
+- `[bitcoin] rpc_host` - Use `127.0.0.1:48332` for testnet4, `127.0.0.1:8332` for mainnet
+- `[bitcoin] rpc_user/rpc_pass` - Must match your bitcoin.conf
+- `[server] listen` - Use `127.0.0.1:50001` for local testing, `0.0.0.0:50001` for external access
+- `[indexer] start_height` - Use `-1` for current tip, `0` for genesis, or specific block number
 
 ### Bitcoin Core Setup (Testnet4 Example)
 
@@ -45,10 +89,15 @@ dbcache=512
 maxmempool=300
 disablewallet=1
 
+# Tor configuration (optional)
+proxy=127.0.0.1:9050
+listen=1
+
 # Testnet4
 testnet4=1
 
 [testnet4]
+bind=127.0.0.1
 rpcuser=electrumgo
 rpcpassword=yourpass
 rpcbind=127.0.0.1
@@ -59,6 +108,7 @@ zmqpubrawtx=tcp://127.0.0.1:28333
 
 # --- MAINNET EXAMPLE (commented) ---
 # [main]
+# bind=127.0.0.1
 # rpcuser=electrumgo
 # rpcpassword=yourpass
 # rpcbind=127.0.0.1
@@ -68,16 +118,35 @@ zmqpubrawtx=tcp://127.0.0.1:28333
 # zmqpubrawtx=tcp://127.0.0.1:28333
 ```
 
-## Usage
+Start Bitcoin Core:
 ```bash
-./server -config config.toml
+bitcoind -daemon
+```
+
+For testnet4, verify sync status:
+```bash
+bitcoin-cli -testnet4 getblockchaininfo
+```
+
+## Running
+
+Ensure Bitcoin Core is fully synced before starting the Electrum server:
+
+```bash
+bitcoin-cli -testnet4 getblockchaininfo | grep -E "chain|blocks|headers|verificationprogress"
+```
+
+Start the server:
+
+```bash
+./server -config config.local.toml
 ```
 
 ### Start Height Options
 
 - `start_height = -1` → Start at current tip (forward-indexing only)
 - `start_height = 0` → Full indexing from genesis (requires non-pruned Core)
-- `start_height > 0` → Start from specified height
+- `start_height = 100000` → Start from specified height (e.g., block 100000)
 
 **Important:** For pruned nodes, start height must be >= prune height.
 

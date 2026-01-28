@@ -16,7 +16,7 @@ data/
 *.log
 
 # local config variants
-config.local.toml
+config.toml
 config.toml.bak
 
 # OS

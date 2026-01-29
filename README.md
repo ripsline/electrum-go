@@ -4,7 +4,7 @@ A Go-based Electrum server designed to work with a **pruned Bitcoin Core node**.
 
 **Goal:** Run on a cheap VPS or PC while preserving Electrum privacy benefits.
 
-**Trade-off:** Only wallets created **after the server start height** have full history.
+**Trade-off:** Only wallets created **after the server start height** (configurable) have full history.
 
 ## Features
 
@@ -16,6 +16,7 @@ A Go-based Electrum server designed to work with a **pruned Bitcoin Core node**.
 - Reorg handling with bounded undo logs
 - Batch JSON-RPC support
 - Per-connection write queue (prevents notification corruption)
+- **It is important to note that electrum-go is still beta software**
 
 ## Prerequisites
 
@@ -42,9 +43,9 @@ sudo apt install -y git build-essential pkg-config libzmq3-dev
 
 ```bash
 cd /tmp
-wget https://go.dev/dl/go1.23.6.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.25.6.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go1.23.6.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.25.6.linux-amd64.tar.gz
 echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
 source ~/.profile
 go version
@@ -75,7 +76,7 @@ Key settings to verify:
 - `[server] listen` - Use `127.0.0.1:50001` for local testing
 - `[indexer] start_height` - Use `-1` for current tip, or specific block number
 
-## Start Height Options
+Start Height Options:
 
 - `start_height = -1` → Start at current tip (forward-indexing only)
 - `start_height = 800000` → Start from specified height (e.g., block 800000)
@@ -124,7 +125,8 @@ Ensure Bitcoin Core is fully synced:
 ```bash
 # Testnet4
 bitcoin-cli -testnet4 getblockchaininfo | grep -E "chain|blocks|headers|verificationprogress"
-
+```
+```bash
 # Mainnet
 bitcoin-cli getblockchaininfo | grep -E "chain|blocks|headers|verificationprogress"
 ```

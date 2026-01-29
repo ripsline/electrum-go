@@ -114,8 +114,8 @@ Save and exit (Ctrl+X, Y, Enter).
 ### 3. Start Tor
 
 ```bash
-sudo systemctl enable tor@default
-sudo systemctl start tor@default
+sudo systemctl enable tor
+sudo systemctl start tor
 ```
 
 ### 4. Verify Tor is running
@@ -137,17 +137,9 @@ wget https://bitcoincore.org/bin/bitcoin-core-28.1/SHA256SUMS
 wget https://bitcoincore.org/bin/bitcoin-core-28.1/SHA256SUMS.asc
 ```
 
-### 2. Verify signatures (strongly recommended for mainnet)
+### 2. Verify checksums (strongly recommended for mainnet)
 
 ```bash
-# Import Bitcoin Core signing keys
-wget https://bitcoincore.org/keys/keys.txt
-gpg --import keys.txt
-
-# Verify the signatures
-gpg --verify SHA256SUMS.asc
-
-# Verify checksum
 sha256sum --ignore-missing --check SHA256SUMS
 ```
 
@@ -191,7 +183,7 @@ listen=1
 [main]
 bind=127.0.0.1
 rpcuser=electrumgo
-rpcpassword=CHANGE_TO_STRONG_PASSWORD  # Use a long, random password
+rpcpassword=CHANGE_TO_STRONG_PASSWORD
 rpcbind=127.0.0.1
 rpcallowip=127.0.0.1
 
@@ -237,6 +229,7 @@ WantedBy=multi-user.target
 ```bash
 sudo systemctl enable bitcoind
 sudo systemctl start bitcoind
+sudo systemctl status bitcoind
 ```
 
 ### 8. Monitor sync (this takes days for mainnet)

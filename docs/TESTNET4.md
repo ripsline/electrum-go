@@ -88,8 +88,8 @@ Save and exit (Ctrl+X, Y, Enter).
 ### 3. Start Tor
 
 ```bash
-sudo systemctl enable tor@default
-sudo systemctl start tor@default
+sudo systemctl enable tor
+sudo systemctl start tor
 ```
 
 ### 4. Verify Tor is running
@@ -205,6 +205,7 @@ WantedBy=multi-user.target
 ```bash
 sudo systemctl enable bitcoind
 sudo systemctl start bitcoind
+sudo systemctl status bitcoind
 ```
 
 ### 8. Monitor sync progress

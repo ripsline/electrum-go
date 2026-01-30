@@ -7,7 +7,7 @@
 # Address and port to listen for Electrum client connections.
 # Use "127.0.0.1:50001" for local-only access (recommended for testing).
 # Use "0.0.0.0:50001" to accept connections from any interface (requires TLS in production).
-listen = "0.0.0.0:50001"
+listen = "127.0.0.1:50001"
 
 # Maximum number of concurrent client connections.
 # Each connection uses memory for buffers and subscription tracking.

@@ -6,9 +6,11 @@ import (
     "encoding/json"
     "fmt"
     "log"
+    "strings"
 
     "github.com/btcsuite/btcd/chaincfg/chainhash"
     "github.com/btcsuite/btcd/wire"
+    "github.com/mattn/go-runewidth"
 
     "electrum-go/internal/indexer"
 )
@@ -76,6 +78,14 @@ func (h *ConnectionHandler) handleMethod(method string,
     }
 }
 
+func padRight(s string, width int) string {
+    pad := width - runewidth.StringWidth(s)
+    if pad < 0 {
+        pad = 0
+    }
+    return s + strings.Repeat(" ", pad)
+}
+
 // ============================================================================
 // Server Methods
 // ============================================================================
@@ -105,24 +115,36 @@ func (h *ConnectionHandler) handleServerVersion(params json.RawMessage) (interfa
 
 func (h *ConnectionHandler) handleServerBanner(params json.RawMessage) (interface{}, *Error) {
     checkpoint, _ := h.server.db.LoadCheckpoint()
+
     start := checkpoint.StartHeight
+    if start == 0 {
+        start = int32(h.server.config.Indexer.StartHeight)
+    }
+    if start < 0 {
+        start = checkpoint.Height
+    }
 
-    banner := fmt.Sprintf(`
-         ╔════════════════════════════════════════════════════════════╗
-         ║                    electrum-go Server                      ║
-         ║              Forward-Indexing • Pruned Node Ready          ║
-         ╠════════════════════════════════════════════════════════════╣
-         ║ Indexed from block: %-10d                                  ║
-         ║ Current height:     %-10d                                  ║
-         ║                                                            ║
-         ║ ⚠️  DO NOT IMPORT WALLETS CREATED BEFORE block %d          ║
-         ║     create a fresh wallet.                                 ║
-         ║                                                            ║
-         ║ GitHub: github.com/ripsline/electrum-go                    ║
-         ╚════════════════════════════════════════════════════════════╝
-`, start, checkpoint.Height, start)
+    const innerWidth = 60
+    line := func(text string) string {
+        return "║ " + padRight(text, innerWidth-2) + " ║"
+    }
 
-    return banner, nil
+    var b strings.Builder
+    b.WriteString("╔" + strings.Repeat("═", innerWidth) + "╗\n")
+    b.WriteString(line("electrum-go Server") + "\n")
+    b.WriteString(line("Forward-Indexing • Pruned Node Ready") + "\n")
+    b.WriteString("╠" + strings.Repeat("═", innerWidth) + "╣\n")
+    b.WriteString(line(fmt.Sprintf("Indexed from block: %d", start)) + "\n")
+    b.WriteString(line(fmt.Sprintf("Current height: %d", checkpoint.Height)) + "\n")
+    b.WriteString(line("") + "\n")
+    b.WriteString(line("⚠️  DO NOT IMPORT WALLETS BEFORE block " +
+        fmt.Sprintf("%d", start)) + "\n")
+    b.WriteString(line("    Create a fresh wallet.") + "\n")
+    b.WriteString(line("") + "\n")
+    b.WriteString(line("GitHub: github.com/ripsline/electrum-go") + "\n")
+    b.WriteString("╚" + strings.Repeat("═", innerWidth) + "╝")
+
+    return b.String(), nil
 }
 
 func (h *ConnectionHandler) handleServerDonationAddress(params json.RawMessage) (interface{}, *Error) {
@@ -151,7 +173,6 @@ func (h *ConnectionHandler) handleServerFeatures(params json.RawMessage) (interf
         "protocol_max":   "1.4",
         "genesis_hash":   genesisHash,
         "hash_function":  "sha256",
-        "pruning":        nil,
         "hosts":          map[string]interface{}{},
     }, nil
 }
@@ -229,12 +250,16 @@ func (h *ConnectionHandler) handleBlockHeaders(params json.RawMessage) (interfac
     }
 
     var headers bytes.Buffer
-    actualCount := 0
+    headers.Grow(int(count) * 80)
 
+    actualCount := 0
     for i := int32(startHeight); i < int32(startHeight+count); i++ {
         header, err := h.server.db.GetHeader(i)
         if err != nil {
-            break
+            if h.logReqs {
+                log.Printf("⚠️  [%d] GetHeader(%d) failed: %v", h.connID, i, err)
+            }
+            return nil, &Error{Code: ErrCodeInternal, Message: err.Error()}
         }
         headers.Write(header)
         actualCount++
@@ -264,6 +289,9 @@ func (h *ConnectionHandler) handleEstimateFee(params json.RawMessage) (interface
 
     result, err := h.server.client.EstimateSmartFee(numBlocks, nil)
     if err != nil {
+        if h.logReqs {
+            log.Printf("⚠️  [%d] EstimateFee failed: %v", h.connID, err)
+        }
         return float64(-1), nil
     }
 
@@ -385,6 +413,44 @@ func (h *ConnectionHandler) handleScripthashGetMempool(params json.RawMessage) (
 // Transaction Methods
 // ============================================================================
 
+type TxGetVerboseScript struct {
+    Hex string `json:"hex"`
+}
+
+type TxGetVerboseVin struct {
+    Txid        string             `json:"txid,omitempty"`
+    Vout        uint32             `json:"vout,omitempty"`
+    Sequence    uint32             `json:"sequence"`
+    ScriptSig   *TxGetVerboseScript `json:"scriptSig,omitempty"`
+    Coinbase    string             `json:"coinbase,omitempty"`
+    Txinwitness []string           `json:"txinwitness,omitempty"`
+}
+
+type TxGetVerboseScriptPubKey struct {
+    Hex string `json:"hex"`
+}
+
+type TxGetVerboseVout struct {
+    Value        float64                  `json:"value"`
+    N            int                      `json:"n"`
+    ScriptPubKey TxGetVerboseScriptPubKey `json:"scriptPubKey"`
+}
+
+type TxGetVerbose struct {
+    Hex           string            `json:"hex"`
+    Txid          string            `json:"txid"`
+    Hash          string            `json:"hash"`
+    Version       int32             `json:"version"`
+    Size          int               `json:"size"`
+    Vsize         int               `json:"vsize"`
+    Weight        int               `json:"weight"`
+    Locktime      uint32            `json:"locktime"`
+    Vin           []TxGetVerboseVin `json:"vin"`
+    Vout          []TxGetVerboseVout `json:"vout"`
+    Confirmations int32             `json:"confirmations,omitempty"`
+    Blockhash     string            `json:"blockhash,omitempty"`
+}
+
 func (h *ConnectionHandler) handleTransactionGet(params json.RawMessage) (interface{}, *Error) {
     var args []interface{}
     if err := json.Unmarshal(params, &args); err != nil || len(args) < 1 {
@@ -403,70 +469,27 @@ func (h *ConnectionHandler) handleTransactionGet(params json.RawMessage) (interf
         }
     }
 
-    if verbose {
-        return nil, &Error{Code: ErrCodeMethodNotFound, Message: "verbose transaction.get not implemented"}
-    }
-
-    txidRaw, err := indexer.TxidFromHex(txidStr)
+    hexStr, height, ok, err := h.getTxFromDB(txidStr)
     if err != nil {
-        return nil, &Error{Code: ErrCodeInvalidParams, Message: "invalid txid"}
-    }
-
-    // Try local compact storage first
-    height, txIndex, ok, err := h.server.db.GetTxPos(txidRaw)
-    if err != nil {
-        return nil, &Error{Code: ErrCodeInternal, Message: err.Error()}
+        return nil, err
     }
     if ok {
-        blob, err := h.server.db.GetTxBlob(height)
-        if err != nil {
-            return nil, &Error{Code: ErrCodeInternal, Message: err.Error()}
+        if verbose {
+            return h.buildVerboseTx(hexStr, height)
         }
-        offsets, err := h.server.db.GetTxOffsets(height)
-        if err != nil {
-            return nil, &Error{Code: ErrCodeInternal, Message: err.Error()}
-        }
-
-        if int(txIndex) >= len(offsets) {
-            return nil, &Error{Code: ErrCodeInternal, Message: "tx index out of range"}
-        }
-
-        start := offsets[txIndex]
-        var end uint32
-        if int(txIndex)+1 < len(offsets) {
-            end = offsets[txIndex+1]
-        } else {
-            end = uint32(len(blob))
-        }
-
-        if int(end) > len(blob) || end < start {
-            return nil, &Error{Code: ErrCodeInternal, Message: "invalid tx offsets"}
-        }
-
-        txBytes := blob[start:end]
-        return hex.EncodeToString(txBytes), nil
+        return hexStr, nil
     }
 
-    // Fall back to Core (mempool or very recent)
-    txHash, err := chainhash.NewHashFromStr(txidStr)
+    hexStr, err = h.getTxFromCore(txidStr)
     if err != nil {
-        return nil, &Error{Code: ErrCodeInvalidParams, Message: "invalid txid"}
+        return nil, err
     }
 
-    rawTx, err := h.server.client.GetRawTransaction(txHash)
-    if err != nil {
-        return nil, &Error{
-            Code:    ErrCodeInternal,
-            Message: fmt.Sprintf("transaction not found: %v", err),
-        }
+    if verbose {
+        return h.buildVerboseTx(hexStr, 0)
     }
 
-    var buf bytes.Buffer
-    if err := rawTx.MsgTx().Serialize(&buf); err != nil {
-        return nil, &Error{Code: ErrCodeInternal, Message: err.Error()}
-    }
-
-    return hex.EncodeToString(buf.Bytes()), nil
+    return hexStr, nil
 }
 
 func (h *ConnectionHandler) handleTransactionBroadcast(params json.RawMessage) (interface{}, *Error) {
@@ -566,4 +589,171 @@ func (h *ConnectionHandler) parseScripthashParam(params json.RawMessage) ([]byte
     }
 
     return scripthash, nil
+}
+
+func (h *ConnectionHandler) getTxFromDB(
+    txidStr string,
+) (string, int32, bool, *Error) {
+    txidRaw, err := indexer.TxidFromHex(txidStr)
+    if err != nil {
+        return "", 0, false, &Error{Code: ErrCodeInvalidParams, Message: "invalid txid"}
+    }
+
+    height, txIndex, ok, err := h.server.db.GetTxPos(txidRaw)
+    if err != nil {
+        return "", 0, false, &Error{Code: ErrCodeInternal, Message: err.Error()}
+    }
+    if !ok {
+        return "", 0, false, nil
+    }
+
+    blob, err := h.server.db.GetTxBlob(height)
+    if err != nil {
+        return "", 0, false, &Error{Code: ErrCodeInternal, Message: err.Error()}
+    }
+    offsets, err := h.server.db.GetTxOffsets(height)
+    if err != nil {
+        return "", 0, false, &Error{Code: ErrCodeInternal, Message: err.Error()}
+    }
+
+    if int(txIndex) >= len(offsets) {
+        return "", 0, false, &Error{Code: ErrCodeInternal, Message: "tx index out of range"}
+    }
+
+    start := offsets[txIndex]
+    var end uint32
+    if int(txIndex)+1 < len(offsets) {
+        end = offsets[txIndex+1]
+    } else {
+        end = uint32(len(blob))
+    }
+
+    if int(end) > len(blob) || end < start {
+        return "", 0, false, &Error{Code: ErrCodeInternal, Message: "invalid tx offsets"}
+    }
+
+    txBytes := blob[start:end]
+    return hex.EncodeToString(txBytes), height, true, nil
+}
+
+func (h *ConnectionHandler) getTxFromCore(txidStr string) (string, *Error) {
+    txHash, err := chainhash.NewHashFromStr(txidStr)
+    if err != nil {
+        return "", &Error{Code: ErrCodeInvalidParams, Message: "invalid txid"}
+    }
+
+    rawTx, err := h.server.client.GetRawTransaction(txHash)
+    if err != nil {
+        return "", &Error{
+            Code:    ErrCodeInternal,
+            Message: fmt.Sprintf("transaction not found: %v", err),
+        }
+    }
+
+    var buf bytes.Buffer
+    if err := rawTx.MsgTx().Serialize(&buf); err != nil {
+        return "", &Error{Code: ErrCodeInternal, Message: err.Error()}
+    }
+
+    return hex.EncodeToString(buf.Bytes()), nil
+}
+
+func (h *ConnectionHandler) buildVerboseTx(
+    txHex string,
+    height int32,
+) (interface{}, *Error) {
+    txBytes, err := hex.DecodeString(txHex)
+    if err != nil {
+        return nil, &Error{Code: ErrCodeInternal, Message: "invalid tx hex"}
+    }
+
+    var msg wire.MsgTx
+    if err := msg.Deserialize(bytes.NewReader(txBytes)); err != nil {
+        return nil, &Error{Code: ErrCodeInternal, Message: err.Error()}
+    }
+
+    totalSize := msg.SerializeSize()
+    baseSize := msg.SerializeSizeStripped()
+    weight := baseSize*4 + (totalSize - baseSize)
+    vsize := (weight + 3) / 4
+
+    txid := msg.TxHash().String()
+    hash := txid
+    if hasWitness(&msg) {
+        hash = msg.WitnessHash().String()
+    }
+
+    vin := make([]TxGetVerboseVin, 0, len(msg.TxIn))
+    for _, in := range msg.TxIn {
+        v := TxGetVerboseVin{
+            Sequence: in.Sequence,
+        }
+
+        if indexer.IsCoinbaseInput(in) {
+            v.Coinbase = hex.EncodeToString(in.SignatureScript)
+        } else {
+            v.Txid = in.PreviousOutPoint.Hash.String()
+            v.Vout = in.PreviousOutPoint.Index
+            v.ScriptSig = &TxGetVerboseScript{
+                Hex: hex.EncodeToString(in.SignatureScript),
+            }
+        }
+
+        if len(in.Witness) > 0 {
+            w := make([]string, 0, len(in.Witness))
+            for _, item := range in.Witness {
+                w = append(w, hex.EncodeToString(item))
+            }
+            v.Txinwitness = w
+        }
+
+        vin = append(vin, v)
+    }
+
+    vout := make([]TxGetVerboseVout, 0, len(msg.TxOut))
+    for i, out := range msg.TxOut {
+        vout = append(vout, TxGetVerboseVout{
+            Value: float64(out.Value) / 1e8,
+            N:     i,
+            ScriptPubKey: TxGetVerboseScriptPubKey{
+                Hex: hex.EncodeToString(out.PkScript),
+            },
+        })
+    }
+
+    res := TxGetVerbose{
+        Hex:      txHex,
+        Txid:     txid,
+        Hash:     hash,
+        Version:  msg.Version,
+        Size:     totalSize,
+        Vsize:    vsize,
+        Weight:   weight,
+        Locktime: msg.LockTime,
+        Vin:      vin,
+        Vout:     vout,
+    }
+
+    if height > 0 {
+        checkpoint, err := h.server.db.LoadCheckpoint()
+        if err == nil && checkpoint.Height >= height {
+            res.Confirmations = checkpoint.Height - height + 1
+        }
+        if h.server.client != nil {
+            if bh, err := h.server.client.GetBlockHash(int64(height)); err == nil {
+                res.Blockhash = bh.String()
+            }
+        }
+    }
+
+    return res, nil
+}
+
+func hasWitness(tx *wire.MsgTx) bool {
+    for _, in := range tx.TxIn {
+        if len(in.Witness) > 0 {
+            return true
+        }
+    }
+    return false
 }

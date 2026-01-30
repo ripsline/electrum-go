@@ -242,9 +242,11 @@ func (bi *BlockIndexer) IndexBlock(block *wire.MsgBlock, height int32) error {
         return fmt.Errorf("failed to save undo data: %w", err)
     }
 
+    prevCheckpoint, _ := bi.db.LoadCheckpoint()
     checkpoint := storage.Checkpoint{
-        Height:    height,
-        BlockHash: blockHashHex,
+        Height:      height,
+        BlockHash:   blockHashHex,
+        StartHeight: prevCheckpoint.StartHeight,
     }
     if err := bi.db.SaveCheckpointInBatch(batch, checkpoint); err != nil {
         return fmt.Errorf("failed to save checkpoint: %w", err)

@@ -107,7 +107,7 @@ zmqpubrawtx=tcp://127.0.0.1:28333
 **For Mainnet:**
 ```ini
 server=1
-prune=20000
+prune=10000
 
 [main]
 rpcuser=electrumgo

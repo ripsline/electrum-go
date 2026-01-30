@@ -17,6 +17,7 @@ package indexer
 import (
     "crypto/sha256"
     "encoding/hex"
+    "fmt"
 
     "github.com/btcsuite/btcd/chaincfg/chainhash"
     "github.com/btcsuite/btcd/wire"
@@ -44,7 +45,8 @@ func (cs *ChainState) String() string {
     if cs.IsEmpty() {
         return "ChainState{empty}"
     }
-    return "ChainState{height=" + string(rune(cs.Height)) + ", hash=" + cs.BlockHash.String()[:16] + "...}"
+    return fmt.Sprintf("ChainState{height=%d, hash=%s...}",
+        cs.Height, cs.BlockHash.String()[:16])
 }
 
 // ProcessedOutput represents a transaction output after processing.

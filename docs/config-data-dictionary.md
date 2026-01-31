@@ -12,7 +12,7 @@ This page documents the configuration keys for electrum-go.
 |bitcoin|zmq_tx_addr|string|ZMQ endpoint for raw transaction notifications|
 |storage|db_path|string|Path to the Pebble database directory|
 |storage|max_reorg_depth|int|Maximum reorg depth to keep undo logs for|
-|indexer|start_height|int|Height to begin indexing from; -1 for tip, 0 for genesis|
+|indexer|start_height|int|Height to begin indexing from; -1 for tip|
 |indexer|checkpoint_interval|int|Blocks between checkpoint saves during initial sync|
 |indexer|undo_prune_interval|int|Blocks between undo log pruning runs|
 |logging|level|string|Logging level: debug, info, warn, error|

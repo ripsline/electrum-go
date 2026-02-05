@@ -63,10 +63,10 @@ go build ./cmd/server
 
 ### 4. Configure
 
-Copy the template configuration:
+Copy the example configuration:
 
 ```bash
-cp config.template.toml config.toml
+cp config.example.toml config.toml
 nano config.toml
 ```
 
@@ -139,7 +139,7 @@ Start the server:
 
 ## Privacy
 
-electrum-go provides enhanced privacy compared to public Electrum servers by running your own private index. Your wallet derives addresses locally from your extended public key (xpub), which never leaves your device. When querying the server, only individual addresses are sent. Without access to your xpub, the server cannot link these addresses together or derive your other addresses.
+A private electrum server is the most private way to connect a bitcoin wallet. electrum-go provides an elegant solution to the storage requirements of these servers, without privacy trade-offs.
 
 **Key privacy features:**
 - Your wallet transactions are never stored on the server in an identifiable way
@@ -151,7 +151,7 @@ electrum-go provides enhanced privacy compared to public Electrum servers by run
 
 - Importing wallets created before the start height will not have full history. This can be dangerous.
 - Please generate a fresh wallet after server start.
-- Some Electrum protocol methods are still unimplemented
+- Some Electrum protocol methods are still unimplemented.
 
 ## Documentation
 

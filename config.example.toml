@@ -16,7 +16,7 @@ max_connections = 100
 
 # Request timeout for client operations (in seconds).
 # Clients that don't send data within this period are disconnected.
-request_timeout_seconds = 1700
+request_timeout_seconds = 1200
 
 [bitcoin]
 # Bitcoin Core RPC connection settings (TESTNET4).

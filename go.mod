@@ -1,6 +1,6 @@
-module electrum-go
+module github.com/ripsline/electrum-go
 
-go 1.23.2
+go 1.25.6
 
 require (
 	github.com/btcsuite/btcd v0.25.0

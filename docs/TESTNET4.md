@@ -266,7 +266,7 @@ Update these settings:
 [server]
 listen = "127.0.0.1:50001"
 max_connections = 100
-request_timeout_seconds = 300
+request_timeout_seconds = 1200
 
 [bitcoin]
 rpc_host = "127.0.0.1:48332"
@@ -280,9 +280,11 @@ db_path = "./data/index.db"
 max_reorg_depth = 144
 
 [indexer]
-start_height = -1  # Start from current tip
-checkpoint_interval = 100
-undo_prune_interval = 1000
+# Start from current tip (recommended)
+start_height = -1
+
+# OR start from specific height
+# start_height = 120000
 
 [logging]
 level = "info"

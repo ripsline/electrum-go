@@ -8,9 +8,9 @@ This guide walks you through deploying electrum-go on Bitcoin mainnet for produc
 
 - Ubuntu 24.04+ server (or similar Linux distribution)
 - **At least 4GB RAM**
-- **At least 100GB disk space** (with heavy pruning)
+- **At least 90GB disk space** (with heavy pruning)
 - sudo access
-- Backup and security plan (write down your fresh seed!)
+- Backup and security plan (write down new seed phrase!)
 - **DO NOT IMPORT AN OLD WALLET UNLESS YOU KNOW WHAT YOU'RE DOING**
 
 ## User Setup
@@ -36,7 +36,6 @@ All subsequent commands in this guide should be run as your chosen user (we'll u
 ### Disk Space
 
 electrum-go is designed for **pruned nodes**. Configure `prune=` based on available space:
-- Minimum: `prune=550` (keeps ~550MB of blocks)
 - Recommended: `prune=10000` (~10GB)
 
 **Note:** If you want to run a full archival node, use a more mature Electrum server implementation like Electrs or Fulcrum.
@@ -52,10 +51,10 @@ electrum-go is designed for **pruned nodes**. Configure `prune=` based on availa
 
 For mainnet, choose carefully:
 
-- `start_height = -1`: Start from current tip (recommended, ~1-2 hours to sync)
+- `start_height = -1`: Start from current tip (recommended)
 - `start_height = 840000`: Start from recent height (e.g., 2024 blocks)
 
-**Remember:** Wallets created before your start height won't have full history.
+**Remember:** Wallets created before your start height won't have full history. This can be dangerous.
 
 ## Part 1: Firewall Configuration
 
@@ -293,7 +292,7 @@ nano config.toml
 [server]
 listen = "127.0.0.1:50001"
 max_connections = 100
-request_timeout_seconds = 300
+request_timeout_seconds = 1200
 
 [bitcoin]
 rpc_host = "127.0.0.1:8332"  # Mainnet RPC port

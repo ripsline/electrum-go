@@ -6,8 +6,8 @@ import (
     "fmt"
 
     "github.com/btcsuite/btcd/chaincfg/chainhash"
-
-    "electrum-go/internal/storage"
+    
+    "github.com/ripsline/electrum-go/internal/storage"
 )
 
 type MerkleProof struct {

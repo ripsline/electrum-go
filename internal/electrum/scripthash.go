@@ -7,8 +7,8 @@ import (
     "fmt"
     "sort"
 
-    "electrum-go/internal/indexer"
-    "electrum-go/internal/storage"
+    "github.com/ripsline/electrum-go/internal/indexer"
+    "github.com/ripsline/electrum-go/internal/storage"
 )
 
 func GetScripthashHistory(db *storage.DB, mempool *indexer.MempoolOverlay,

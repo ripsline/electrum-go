@@ -34,7 +34,7 @@ import (
 
     "github.com/btcsuite/btcd/wire"
 
-    "electrum-go/internal/storage"
+    "github.com/ripsline/electrum-go/internal/storage"
 )
 
 // Writer handles serialized writes to the database.

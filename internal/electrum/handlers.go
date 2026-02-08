@@ -12,7 +12,7 @@ import (
     "github.com/btcsuite/btcd/wire"
     "github.com/mattn/go-runewidth"
 
-    "electrum-go/internal/indexer"
+    "github.com/ripsline/electrum-go/internal/indexer"
 )
 
 func (h *ConnectionHandler) handleMethod(method string,

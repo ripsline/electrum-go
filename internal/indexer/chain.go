@@ -10,7 +10,7 @@ import (
     "github.com/btcsuite/btcd/rpcclient"
     "github.com/btcsuite/btcd/wire"
 
-    "electrum-go/internal/storage"
+    "github.com/ripsline/electrum-go/internal/storage"
 )
 
 // ChainManager coordinates chain state and block processing.

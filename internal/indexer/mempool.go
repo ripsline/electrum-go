@@ -10,7 +10,7 @@ import (
     "github.com/btcsuite/btcd/wire"
     "github.com/cockroachdb/pebble"
 
-    "electrum-go/internal/storage"
+    "github.com/ripsline/electrum-go/internal/storage"
 )
 
 type MempoolOverlay struct {

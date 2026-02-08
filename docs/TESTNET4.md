@@ -256,7 +256,7 @@ go build ./cmd/server
 ### 4. Configure electrum-go
 
 ```bash
-cp config.template.toml config.toml
+cp config.example.toml config.toml
 nano config.toml
 ```
 

@@ -17,10 +17,10 @@ import (
     "github.com/btcsuite/btcd/chaincfg/chainhash"
     "github.com/btcsuite/btcd/rpcclient"
 
-    "electrum-go/internal/config"
-    "electrum-go/internal/electrum"
-    "electrum-go/internal/indexer"
-    "electrum-go/internal/storage"
+    "github.com/ripsline/electrum-go/internal/config"
+    "github.com/ripsline/electrum-go/internal/electrum"
+    "github.com/ripsline/electrum-go/internal/indexer"
+    "github.com/ripsline/electrum-go/internal/storage"
 )
 
 var (

@@ -21,8 +21,24 @@ request_timeout_seconds = 1200
 [bitcoin]
 # Bitcoin Core RPC connection settings (TESTNET4).
 rpc_host = "127.0.0.1:48332"
-rpc_user = "electrumgo"
-rpc_pass = "yourpass"
+
+# --- AUTH: choose ONE of the two options below ---
+#
+# Option 1 (PREFERRED): cookie auth.
+# Bitcoin Core writes a fresh cookie file on every startup. No secrets in
+# your config, nothing to rotate manually. Electrum-go must run as a user
+# that can read the file — typically the same user bitcoind runs as.
+# Default datadir paths:
+#   mainnet:  /var/lib/bitcoin/.cookie  (or ~/.bitcoin/.cookie)
+#   testnet4: /var/lib/bitcoin/testnet4/.cookie
+#   testnet3: /var/lib/bitcoin/testnet3/.cookie
+#   signet:   /var/lib/bitcoin/signet/.cookie
+rpc_cookie_path = "/var/lib/bitcoin/testnet4/.cookie"
+#
+# Option 2: static rpcuser/rpcpassword from bitcoin.conf.
+# Leave rpc_cookie_path unset (or empty) and set these instead.
+# rpc_user = "electrumgo"
+# rpc_pass = "yourpass"
 
 # ZMQ endpoints for real-time notifications.
 # Must match zmqpubrawblock/zmqpubrawtx in bitcoin.conf
@@ -31,8 +47,7 @@ zmq_tx_addr    = "tcp://127.0.0.1:28333"
 
 # --- MAINNET EXAMPLE (commented) ---
 # rpc_host = "127.0.0.1:8332"
-# rpc_user = "electrumgo"
-# rpc_pass = "yourpass"
+# rpc_cookie_path = "/var/lib/bitcoin/.cookie"
 # zmq_block_addr = "tcp://127.0.0.1:28332"
 # zmq_tx_addr    = "tcp://127.0.0.1:28333"
 

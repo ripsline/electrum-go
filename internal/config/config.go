@@ -50,8 +50,15 @@ type BitcoinConfig struct {
 
     // RPC authentication credentials.
     // Must match rpcuser/rpcpassword in bitcoin.conf.
+    // Leave empty to use cookie auth via RPCCookiePath.
     RPCUser string `toml:"rpc_user"`
     RPCPass string `toml:"rpc_pass"`
+
+    // Path to Bitcoin Core's RPC cookie file (e.g., "/var/lib/bitcoin/.cookie").
+    // When set, rpc_user and rpc_pass are ignored and credentials are read
+    // from this file at startup. Preferred over rpc_user/rpc_pass because
+    // bitcoind manages it automatically and no secrets live in config files.
+    RPCCookiePath string `toml:"rpc_cookie_path"`
 
     // ZMQ endpoint for raw block notifications.
     // Must match zmqpubrawblock in bitcoin.conf.
@@ -186,11 +193,21 @@ func (c *Config) Validate() error {
     if c.Bitcoin.RPCHost == "" {
         errs = append(errs, "bitcoin.rpc_host is required")
     }
-    if c.Bitcoin.RPCUser == "" {
-        errs = append(errs, "bitcoin.rpc_user is required")
-    }
-    if c.Bitcoin.RPCPass == "" {
-        errs = append(errs, "bitcoin.rpc_pass is required")
+    // Auth: either cookie path OR rpc_user+rpc_pass, not both, not neither.
+    cookieSet := c.Bitcoin.RPCCookiePath != ""
+    userPassSet := c.Bitcoin.RPCUser != "" && c.Bitcoin.RPCPass != ""
+    switch {
+    case cookieSet && c.Bitcoin.RPCPass != "":
+        errs = append(errs, "bitcoin: set either rpc_cookie_path or rpc_user/rpc_pass, not both")
+    case !cookieSet && !userPassSet:
+        errs = append(errs, "bitcoin: either rpc_cookie_path or both rpc_user and rpc_pass must be set")
+    case cookieSet:
+        // Verify the cookie file is readable now so we fail fast with a clear error.
+        if st, err := os.Stat(c.Bitcoin.RPCCookiePath); err != nil {
+            errs = append(errs, fmt.Sprintf("bitcoin.rpc_cookie_path %q: %v", c.Bitcoin.RPCCookiePath, err))
+        } else if st.IsDir() {
+            errs = append(errs, fmt.Sprintf("bitcoin.rpc_cookie_path %q is a directory", c.Bitcoin.RPCCookiePath))
+        }
     }
     if c.Bitcoin.ZMQBlockAddr == "" {
         errs = append(errs, "bitcoin.zmq_block_addr is required")
@@ -243,6 +260,23 @@ func (c *Config) Validate() error {
     return nil
 }
 
+// ReadRPCCookie reads Bitcoin Core's cookie file and returns the user:pass pair.
+// Bitcoind writes the cookie in the form "__cookie__:<random>" on startup and
+// rewrites it on every restart, so this should be called fresh each time a new
+// RPC connection is established rather than cached for the life of the process.
+func ReadRPCCookie(path string) (user, pass string, err error) {
+    data, err := os.ReadFile(path)
+    if err != nil {
+        return "", "", fmt.Errorf("failed to read rpc cookie %s: %w", path, err)
+    }
+    s := strings.TrimSpace(string(data))
+    idx := strings.IndexByte(s, ':')
+    if idx <= 0 || idx == len(s)-1 {
+        return "", "", fmt.Errorf("rpc cookie %s: malformed, expected user:pass", path)
+    }
+    return s[:idx], s[idx+1:], nil
+}
+
 // EnsureDBDirectory creates the database directory if it doesn't exist.
 // Returns an error if the directory cannot be created.
 func (c *Config) EnsureDBDirectory() error {
@@ -261,9 +295,16 @@ func (c *Config) EnsureDBDirectory() error {
 // String returns a human-readable representation of the config.
 // Sensitive fields (passwords) are masked.
 func (c *Config) String() string {
-    passDisplay := "****"
-    if c.Bitcoin.RPCPass == "" {
-        passDisplay = "(empty)"
+    authLine := ""
+    if c.Bitcoin.RPCCookiePath != "" {
+        authLine = fmt.Sprintf("    RPC Auth:         cookie (%s)", c.Bitcoin.RPCCookiePath)
+    } else {
+        passDisplay := "****"
+        if c.Bitcoin.RPCPass == "" {
+            passDisplay = "(empty)"
+        }
+        authLine = fmt.Sprintf("    RPC User:         %s\n    RPC Pass:         %s",
+            c.Bitcoin.RPCUser, passDisplay)
     }
 
     return fmt.Sprintf(`Configuration:
@@ -273,8 +314,7 @@ func (c *Config) String() string {
     Request Timeout:  %s
   Bitcoin:
     RPC Host:         %s
-    RPC User:         %s
-    RPC Pass:         %s
+%s
     ZMQ Block:        %s
     ZMQ Tx:           %s
   Storage:
@@ -291,8 +331,7 @@ func (c *Config) String() string {
         c.Server.MaxConnections,
         c.Server.RequestTimeout,
         c.Bitcoin.RPCHost,
-        c.Bitcoin.RPCUser,
-        passDisplay,
+        authLine,
         c.Bitcoin.ZMQBlockAddr,
         c.Bitcoin.ZMQTxAddr,
         c.Storage.DBPath,

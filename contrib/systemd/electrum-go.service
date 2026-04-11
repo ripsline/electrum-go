@@ -1,0 +1,39 @@
+[Unit]
+Description=electrum-go Electrum protocol server
+Documentation=https://github.com/ripsline/electrum-go
+After=bitcoind.service
+Wants=bitcoind.service
+
+[Service]
+Type=simple
+User=bitcoin
+Group=bitcoin
+
+ExecStart=/usr/local/bin/electrum-go --config /etc/electrum-go/config.toml
+
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# Filesystem hardening. ReadWritePaths must include the Pebble DB directory
+# configured in /etc/electrum-go/config.toml (storage.db_path).
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/electrum-go
+
+# Process / kernel hardening
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

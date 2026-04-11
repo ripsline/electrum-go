@@ -78,6 +78,7 @@ func main() {
     rpcHost := flag.String("rpc-host", "", "Bitcoin Core RPC host:port")
     rpcUser := flag.String("rpc-user", "", "Bitcoin Core RPC username")
     rpcPass := flag.String("rpc-pass", "", "Bitcoin Core RPC password")
+    rpcCookie := flag.String("rpc-cookie", "", "Path to Bitcoin Core RPC cookie file")
     dbPath := flag.String("db-path", "", "Path to database")
     startHeight := flag.Int("start-height", -9999, "Start height (-1=tip, 0=genesis)")
     showVersion := flag.Bool("version", false, "Show version and exit")
@@ -98,8 +99,13 @@ func main() {
         log.Fatalf("❌ Failed to load configuration: %v", err)
     }
 
-    applyOverrides(cfg, *listenAddr, *rpcHost, *rpcUser, *rpcPass, *dbPath,
-        *startHeight)
+    applyOverrides(cfg, *listenAddr, *rpcHost, *rpcUser, *rpcPass, *rpcCookie,
+        *dbPath, *startHeight)
+    // Re-validate after CLI overrides so conflicting flags (e.g. both cookie
+    // and user/pass) are caught before we try to connect.
+    if err := cfg.Validate(); err != nil {
+        log.Fatalf("❌ Invalid configuration after applying flags: %v", err)
+    }
 
     log.Println(cfg.String())
     log.Println()
@@ -278,18 +284,26 @@ func loadConfig(configFile string) (*config.Config, error) {
 }
 
 func applyOverrides(cfg *config.Config, listen, rpcHost, rpcUser, rpcPass,
-    dbPath string, startHeight int) {
+    rpcCookie, dbPath string, startHeight int) {
     if listen != "" {
         cfg.Server.Listen = listen
     }
     if rpcHost != "" {
         cfg.Bitcoin.RPCHost = rpcHost
     }
+    if rpcCookie != "" {
+        cfg.Bitcoin.RPCCookiePath = rpcCookie
+        // Cookie auth wins over any user/pass carried from the config file.
+        cfg.Bitcoin.RPCUser = ""
+        cfg.Bitcoin.RPCPass = ""
+    }
     if rpcUser != "" {
         cfg.Bitcoin.RPCUser = rpcUser
+        cfg.Bitcoin.RPCCookiePath = ""
     }
     if rpcPass != "" {
         cfg.Bitcoin.RPCPass = rpcPass
+        cfg.Bitcoin.RPCCookiePath = ""
     }
     if dbPath != "" {
         cfg.Storage.DBPath = dbPath
@@ -300,10 +314,22 @@ func applyOverrides(cfg *config.Config, listen, rpcHost, rpcUser, rpcPass,
 }
 
 func connectToBitcoinCore(cfg *config.Config) (*rpcclient.Client, error) {
+    user, pass := cfg.Bitcoin.RPCUser, cfg.Bitcoin.RPCPass
+    if cfg.Bitcoin.RPCCookiePath != "" {
+        // Read fresh on every connect so a bitcoind restart (which rotates
+        // the cookie) is picked up without stale credentials.
+        u, p, err := config.ReadRPCCookie(cfg.Bitcoin.RPCCookiePath)
+        if err != nil {
+            return nil, err
+        }
+        user, pass = u, p
+        log.Printf("🔐 Using RPC cookie auth from %s", cfg.Bitcoin.RPCCookiePath)
+    }
+
     connCfg := &rpcclient.ConnConfig{
         Host:         cfg.Bitcoin.RPCHost,
-        User:         cfg.Bitcoin.RPCUser,
-        Pass:         cfg.Bitcoin.RPCPass,
+        User:         user,
+        Pass:         pass,
         HTTPPostMode: true,
         DisableTLS:   true,
     }

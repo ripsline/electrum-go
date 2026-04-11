@@ -126,10 +126,10 @@ func (m *MempoolOverlay) AddTransaction(tx *wire.MsgTx) ([]string, error) {
                     TxidToHex(prevTxid), prevVout, err)
             }
 
-            if scripthash == nil {
-                log.Printf("⚠️  Mempool tx %s spends unknown output %s:%d",
-                    txidHex[:16], TxidToHex(prevTxid)[:16], prevVout)
-            } else {
+            // scripthash == nil is expected in forward-indexing mode: the
+            // spent UTXO was created before our start height and isn't in
+            // our index. Leave the input unresolved and keep indexing.
+            if scripthash != nil {
                 input.Scripthash = scripthash
 
                 utxo, err := m.db.GetUTXO(scripthash, prevTxid, prevVout)

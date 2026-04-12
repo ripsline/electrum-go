@@ -34,6 +34,7 @@ import (
 
     "github.com/btcsuite/btcd/wire"
 
+    "github.com/ripsline/electrum-go/internal/metrics"
     "github.com/ripsline/electrum-go/internal/storage"
 )
 
@@ -182,12 +183,13 @@ func (w *Writer) processBlockJob(block *wire.MsgBlock) writeResult {
     affected := w.collectAffectedScripthashes(block)
 
     // Use chain manager to process (handles validation, reorgs, etc.)
+    // Per-block metrics are recorded inside blockIndexer.IndexBlock so that
+    // both live and catch-up paths are counted.
     height, err := w.chainManager.ProcessBlock(block)
     if err != nil {
         return writeResult{err: err}
     }
 
-    // Update metrics
     w.blocksIndexed++
     w.lastBlockTime = time.Now()
 
@@ -211,6 +213,7 @@ func (w *Writer) processMempoolJob(tx *wire.MsgTx) writeResult {
     }
 
     w.mempoolTxsAdded++
+    metrics.MempoolTxsIndexed.Inc()
 
     return writeResult{affectedScripthashes: affected}
 }

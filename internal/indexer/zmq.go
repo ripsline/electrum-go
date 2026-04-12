@@ -12,6 +12,8 @@ import (
 
     "github.com/btcsuite/btcd/wire"
     zmq "github.com/pebbe/zmq4"
+
+    "github.com/ripsline/electrum-go/internal/metrics"
 )
 
 type ZMQSubscriber struct {
@@ -325,6 +327,7 @@ func (z *ZMQSubscriber) recvTxs(socket *zmq.Socket) error {
         z.mu.Lock()
         z.txsReceived++
         z.mu.Unlock()
+        metrics.MempoolTxsReceived.Inc()
 
         // Never drop mempool txs. Backpressure is allowed here.
         select {
@@ -347,6 +350,7 @@ func (z *ZMQSubscriber) handleSequence(stream string, seqBytes []byte) {
     if stream == "block" {
         if z.lastBlockSeq != 0 && seq != z.lastBlockSeq+1 {
             z.seqGapsBlock++
+            metrics.ZMQSeqGaps.WithLabelValues("block").Inc()
             expected := z.lastBlockSeq + 1
             select {
             case z.gapChan <- ZMQGapEvent{Stream: "block", Expected: expected, Got: seq}:
@@ -357,6 +361,7 @@ func (z *ZMQSubscriber) handleSequence(stream string, seqBytes []byte) {
     } else if stream == "tx" {
         if z.lastTxSeq != 0 && seq != z.lastTxSeq+1 {
             z.seqGapsTx++
+            metrics.ZMQSeqGaps.WithLabelValues("tx").Inc()
             expected := z.lastTxSeq + 1
             select {
             case z.gapChan <- ZMQGapEvent{Stream: "tx", Expected: expected, Got: seq}:

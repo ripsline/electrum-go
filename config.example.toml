@@ -78,3 +78,11 @@ level = "info"
 
 # Whether to log each Electrum RPC request (verbose, useful for debugging)
 log_requests = false
+
+[metrics]
+# Enable the Prometheus /metrics endpoint on a separate local port.
+# Default: disabled. Turn on to expose operational counters for scraping.
+# The endpoint has no authentication — keep it bound to 127.0.0.1 and
+# scrape through a trusted network (or an SSH tunnel).
+enabled = false
+listen  = "127.0.0.1:9101"

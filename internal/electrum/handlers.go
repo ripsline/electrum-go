@@ -7,16 +7,24 @@ import (
     "fmt"
     "log"
     "strings"
+    "time"
 
     "github.com/btcsuite/btcd/chaincfg/chainhash"
     "github.com/btcsuite/btcd/wire"
     "github.com/mattn/go-runewidth"
 
     "github.com/ripsline/electrum-go/internal/indexer"
+    "github.com/ripsline/electrum-go/internal/metrics"
 )
 
 func (h *ConnectionHandler) handleMethod(method string,
-    params json.RawMessage) (interface{}, *Error) {
+    params json.RawMessage) (result interface{}, rpcErr *Error) {
+    start := time.Now()
+    defer func() {
+        metrics.ElectrumRPCDuration.WithLabelValues(method).
+            Observe(time.Since(start).Seconds())
+    }()
+
     switch method {
     case "server.version":
         return h.handleServerVersion(params)
@@ -513,7 +521,9 @@ func (h *ConnectionHandler) handleTransactionBroadcast(params json.RawMessage) (
         return nil, &Error{Code: ErrCodeInvalidParams, Message: fmt.Sprintf("invalid transaction: %v", err)}
     }
 
+    rpcStart := time.Now()
     txHash, err := h.server.client.SendRawTransaction(&msgTx, false)
+    metrics.ObserveBitcoinRPC("sendrawtransaction", rpcStart, err)
     if err != nil {
         return nil, &Error{Code: ErrCodeInternal, Message: fmt.Sprintf("broadcast failed: %v", err)}
     }

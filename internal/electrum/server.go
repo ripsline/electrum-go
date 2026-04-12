@@ -16,6 +16,7 @@ import (
 
     "github.com/ripsline/electrum-go/internal/config"
     "github.com/ripsline/electrum-go/internal/indexer"
+    "github.com/ripsline/electrum-go/internal/metrics"
     "github.com/ripsline/electrum-go/internal/storage"
 )
 
@@ -244,11 +245,13 @@ func (s *Server) handleConnection(conn net.Conn) {
         writer.Close()
         conn.Close()
         atomic.AddInt64(&s.activeConnCount, -1)
+        metrics.ActiveConnections.Dec()
         s.wg.Done()
     }()
 
     connID := atomic.AddInt64(&s.connCount, 1)
     atomic.AddInt64(&s.activeConnCount, 1)
+    metrics.ActiveConnections.Inc()
     remoteAddr := conn.RemoteAddr().String()
 
     log.Printf("📱 [%d] New connection from %s", connID, remoteAddr)

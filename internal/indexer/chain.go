@@ -10,6 +10,7 @@ import (
     "github.com/btcsuite/btcd/rpcclient"
     "github.com/btcsuite/btcd/wire"
 
+    "github.com/ripsline/electrum-go/internal/metrics"
     "github.com/ripsline/electrum-go/internal/storage"
 )
 
@@ -61,6 +62,7 @@ func (cm *ChainManager) Initialize() error {
     if result.ReorgDetected {
         log.Printf("🔄 Handled reorg: rolled back %d blocks to height %d",
             result.RolledBackBlocks, result.ForkHeight)
+        metrics.Reorgs.Inc()
     }
 
     // Load current state
@@ -127,6 +129,7 @@ func (cm *ChainManager) ProcessBlock(block *wire.MsgBlock) (int32, error) {
     if actualHeight <= cm.currentHeight {
         log.Printf("🔄 Block height %d <= our tip %d - reorg detected",
             actualHeight, cm.currentHeight)
+        metrics.Reorgs.Inc()
 
         result, err := cm.reorgHandler.CheckAndHandle()
         if err != nil {
@@ -157,6 +160,7 @@ func (cm *ChainManager) ProcessBlock(block *wire.MsgBlock) (int32, error) {
 
     // Case 2c: Heights match but prevHash doesn't - reorg at our tip
     log.Printf("🔄 Reorg at tip detected (height %d)", actualHeight)
+    metrics.Reorgs.Inc()
 
     result, err := cm.reorgHandler.CheckAndHandle()
     if err != nil {
@@ -186,12 +190,16 @@ func (cm *ChainManager) CatchUpTo(targetHeight int32) error {
     blocksProcessed := 0
 
     for height := cm.currentHeight + 1; height <= targetHeight; height++ {
+        rpcStart := time.Now()
         hash, err := cm.client.GetBlockHash(int64(height))
+        metrics.ObserveBitcoinRPC("getblockhash", rpcStart, err)
         if err != nil {
             return fmt.Errorf("failed to get block hash at height %d: %w", height, err)
         }
 
+        rpcStart = time.Now()
         block, err := cm.client.GetBlock(hash)
+        metrics.ObserveBitcoinRPC("getblock", rpcStart, err)
         if err != nil {
             return fmt.Errorf("failed to get block at height %d: %w", height, err)
         }

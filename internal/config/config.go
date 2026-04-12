@@ -7,6 +7,7 @@ package config
 import (
     "errors"
     "fmt"
+    "net"
     "os"
     "path/filepath"
     "strings"
@@ -23,6 +24,18 @@ type Config struct {
     Storage StorageConfig `toml:"storage"`
     Indexer IndexerConfig `toml:"indexer"`
     Logging LoggingConfig `toml:"logging"`
+    Metrics MetricsConfig `toml:"metrics"`
+}
+
+// MetricsConfig holds Prometheus /metrics exporter settings.
+type MetricsConfig struct {
+    // Enabled controls whether the /metrics HTTP endpoint is exposed.
+    // Defaults to false so upgrades are a no-op for existing deployments.
+    Enabled bool `toml:"enabled"`
+
+    // Listen is the host:port the metrics HTTP server binds to.
+    // Keep it local (127.0.0.1) and scrape through a trusted network.
+    Listen string `toml:"listen"`
 }
 
 // ServerConfig holds Electrum protocol server settings.
@@ -134,6 +147,10 @@ func DefaultConfig() *Config {
         Logging: LoggingConfig{
             Level:       "info",
             LogRequests: false,
+        },
+        Metrics: MetricsConfig{
+            Enabled: false,
+            Listen:  "127.0.0.1:9101",
         },
     }
 }
@@ -252,6 +269,16 @@ func (c *Config) Validate() error {
         errs = append(errs, "logging.level must be one of: debug, info, warn, error")
     }
 
+    // Metrics validation (only when enabled — an unused metrics section
+    // should not block startup).
+    if c.Metrics.Enabled {
+        if c.Metrics.Listen == "" {
+            errs = append(errs, "metrics.listen is required when metrics.enabled = true")
+        } else if _, _, err := net.SplitHostPort(c.Metrics.Listen); err != nil {
+            errs = append(errs, fmt.Sprintf("metrics.listen %q: %v", c.Metrics.Listen, err))
+        }
+    }
+
     // Return combined errors
     if len(errs) > 0 {
         return errors.New(strings.Join(errs, "; "))
@@ -307,6 +334,11 @@ func (c *Config) String() string {
             c.Bitcoin.RPCUser, passDisplay)
     }
 
+    metricsLine := "disabled"
+    if c.Metrics.Enabled {
+        metricsLine = fmt.Sprintf("enabled (%s)", c.Metrics.Listen)
+    }
+
     return fmt.Sprintf(`Configuration:
   Server:
     Listen:           %s
@@ -326,7 +358,9 @@ func (c *Config) String() string {
     Prune Undo Every: %d blocks
   Logging:
     Level:            %s
-    Log Requests:     %v`,
+    Log Requests:     %v
+  Metrics:
+    /metrics:         %s`,
         c.Server.Listen,
         c.Server.MaxConnections,
         c.Server.RequestTimeout,
@@ -341,5 +375,6 @@ func (c *Config) String() string {
         c.Indexer.UndoPruneInterval,
         c.Logging.Level,
         c.Logging.LogRequests,
+        metricsLine,
     )
 }

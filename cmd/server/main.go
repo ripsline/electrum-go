@@ -20,6 +20,7 @@ import (
     "github.com/ripsline/electrum-go/internal/config"
     "github.com/ripsline/electrum-go/internal/electrum"
     "github.com/ripsline/electrum-go/internal/indexer"
+    "github.com/ripsline/electrum-go/internal/metrics"
     "github.com/ripsline/electrum-go/internal/storage"
 )
 
@@ -49,7 +50,9 @@ type BlockchainInfo struct {
 }
 
 func getBlockchainInfo(client *rpcclient.Client) (*BlockchainInfo, error) {
+    rpcStart := time.Now()
     result, err := client.RawRequest("getblockchaininfo", nil)
+    metrics.ObserveBitcoinRPC("getblockchaininfo", rpcStart, err)
     if err != nil {
         return nil, fmt.Errorf("getblockchaininfo RPC failed: %w", err)
     }
@@ -138,6 +141,15 @@ func main() {
         log.Fatalf("❌ Failed to get blockchain info: %v", err)
     }
 
+    if cfg.Metrics.Enabled {
+        metrics.Init(info.Chain, Version, GitCommit)
+        go func() {
+            if err := metrics.ServeMetrics(cfg.Metrics.Listen); err != nil {
+                log.Printf("⚠️  Metrics server error: %v", err)
+            }
+        }()
+    }
+
     log.Printf("✅ Connected to Bitcoin Core")
     log.Printf("   Chain:       %s", info.Chain)
     log.Printf("   Blocks:      %d", info.Blocks)
@@ -214,6 +226,10 @@ func main() {
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
+
+    if cfg.Metrics.Enabled {
+        metrics.StartDBSizeSampler(ctx, cfg.Storage.DBPath, 60*time.Second)
+    }
 
     sigChan := make(chan os.Signal, 1)
     signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -547,7 +563,9 @@ func runMainLoop(
             writer.TriggerPrune()
 
         case <-reorgCheckTicker.C:
+            rpcStart := time.Now()
             blockCount, err := rpcClient.GetBlockCount()
+            metrics.ObserveBitcoinRPC("getblockcount", rpcStart, err)
             if err != nil {
                 log.Printf("⚠️  Periodic tip check RPC failed: %v", err)
                 continue
@@ -555,6 +573,7 @@ func runMainLoop(
 
             currentHeight := chainManager.GetCurrentHeight()
             coreTip := int32(blockCount)
+            metrics.BitcoinCoreHeight.Set(float64(coreTip))
 
             if coreTip > currentHeight {
                 missedBlocks := coreTip - currentHeight
@@ -587,6 +606,14 @@ func runMainLoop(
             connCount := server.GetActiveConnectionCount()
             subScripthashes, subHeaders, subConns := server.
                 GetSubscriptionManager().GetTotalSubscriptions()
+
+            metrics.MempoolTxCount.Set(float64(mempool.Count()))
+            metrics.Subscriptions.WithLabelValues("scripthash").
+                Set(float64(subScripthashes))
+            metrics.Subscriptions.WithLabelValues("header").
+                Set(float64(subHeaders))
+            metrics.Subscriptions.WithLabelValues("conn").
+                Set(float64(subConns))
 
             log.Printf("📊 Stats: height=%d, blocks=%d, "+
                 "mempool[rx=%d,idx=%d], conns=%d, "+

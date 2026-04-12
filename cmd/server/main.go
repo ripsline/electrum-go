@@ -185,6 +185,12 @@ func main() {
         log.Fatalf("❌ Failed to initialize chain manager: %v", err)
     }
 
+    // Seed gauges from the loaded state so /metrics reflects reality during
+    // the initial catch-up, not just after the first new block is indexed.
+    metrics.ChainHeight.Set(float64(chainManager.GetCurrentHeight()))
+    metrics.BitcoinCoreHeight.Set(float64(info.Blocks))
+    metrics.MempoolTxCount.Set(float64(mempool.Count()))
+
     // Forward-indexing empty state check
     checkpoint, _ := db.LoadCheckpoint()
     if checkpoint.Height == 0 && checkpoint.BlockHash == "" {

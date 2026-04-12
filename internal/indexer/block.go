@@ -5,10 +5,12 @@ import (
     "encoding/hex"
     "fmt"
     "log"
+    "time"
 
     "github.com/btcsuite/btcd/wire"
     "github.com/cockroachdb/pebble"
 
+    "github.com/ripsline/electrum-go/internal/metrics"
     "github.com/ripsline/electrum-go/internal/storage"
 )
 
@@ -25,6 +27,8 @@ func NewBlockIndexer(db *storage.DB, mempool *MempoolOverlay) *BlockIndexer {
 }
 
 func (bi *BlockIndexer) IndexBlock(block *wire.MsgBlock, height int32) error {
+    start := time.Now()
+
     blockHash := block.BlockHash()
     blockHashBytes := BlockHashFromHash(&blockHash)
     blockHashHex := blockHash.String()
@@ -255,6 +259,10 @@ func (bi *BlockIndexer) IndexBlock(block *wire.MsgBlock, height int32) error {
     if err := batch.Commit(pebble.Sync); err != nil {
         return fmt.Errorf("failed to commit block batch: %w", err)
     }
+
+    metrics.BlockIndexDuration.Observe(time.Since(start).Seconds())
+    metrics.BlocksIndexed.Inc()
+    metrics.ChainHeight.Set(float64(height))
 
     log.Printf("✅ Indexed block %d: %s (%d txs, %d outputs created, %d spent)",
         height, blockHashHex[:16]+"...",

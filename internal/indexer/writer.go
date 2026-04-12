@@ -182,19 +182,16 @@ func (w *Writer) processBlockJob(block *wire.MsgBlock) writeResult {
 
     affected := w.collectAffectedScripthashes(block)
 
-    start := time.Now()
     // Use chain manager to process (handles validation, reorgs, etc.)
+    // Per-block metrics are recorded inside blockIndexer.IndexBlock so that
+    // both live and catch-up paths are counted.
     height, err := w.chainManager.ProcessBlock(block)
     if err != nil {
         return writeResult{err: err}
     }
-    metrics.BlockIndexDuration.Observe(time.Since(start).Seconds())
 
-    // Update metrics
     w.blocksIndexed++
     w.lastBlockTime = time.Now()
-    metrics.BlocksIndexed.Inc()
-    metrics.ChainHeight.Set(float64(height))
 
     return writeResult{
         height:               height,

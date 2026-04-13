@@ -2,6 +2,7 @@
 package indexer
 
 import (
+    "errors"
     "fmt"
     "log"
     "time"
@@ -13,6 +14,10 @@ import (
     "github.com/ripsline/electrum-go/internal/metrics"
     "github.com/ripsline/electrum-go/internal/storage"
 )
+
+// ErrPrunedGap is returned when the indexed chain tip has fallen behind
+// bitcoind's prune height, making it impossible to catch up without gaps.
+var ErrPrunedGap = errors.New("indexed tip is below bitcoind prune height")
 
 // ChainManager coordinates chain state and block processing.
 type ChainManager struct {
@@ -27,6 +32,10 @@ type ChainManager struct {
 
     // Track the starting height for gap detection
     startHeight int32
+
+    // pruneHeight is set when bitcoind is a pruned node; blocks below this
+    // height are unavailable.  Zero means not pruned / unknown.
+    pruneHeight int32
 }
 
 // NewChainManager creates a new chain manager.
@@ -249,10 +258,24 @@ func (cm *ChainManager) CatchUpTo(targetHeight int32) error {
     return nil
 }
 
+// SetPruneHeight records bitcoind's prune height so the chain manager can
+// detect when the indexed tip has fallen behind the prune window.
+func (cm *ChainManager) SetPruneHeight(height int32) {
+    cm.pruneHeight = height
+}
+
 // CatchUpToTip fetches and indexes all blocks from our tip to Core's current tip.
 // BUG 2 FIX: Added gap detection before catching up.
 func (cm *ChainManager) CatchUpToTip() error {
-    // First, verify chain continuity and repair any gaps
+    // Check for pruned gap before doing anything that fetches blocks.
+    // VerifyAndRepairGaps and CatchUpTo both try to fetch blocks by height,
+    // so if our tip is below the prune window, they will fail.
+    if cm.pruneHeight > 0 && cm.currentHeight < cm.pruneHeight {
+        return fmt.Errorf("%w: indexed tip is at %d but bitcoind has pruned blocks below %d",
+            ErrPrunedGap, cm.currentHeight, cm.pruneHeight)
+    }
+
+    // Verify chain continuity and repair any gaps
     if err := cm.VerifyAndRepairGaps(); err != nil {
         return fmt.Errorf("gap repair failed: %w", err)
     }

@@ -6,6 +6,7 @@ import (
     "context"
     "encoding/hex"
     "encoding/json"
+    "errors"
     "flag"
     "fmt"
     "log"
@@ -185,6 +186,10 @@ func main() {
         log.Fatalf("❌ Failed to initialize chain manager: %v", err)
     }
 
+    if info.Pruned && info.PruneHeight > 0 {
+        chainManager.SetPruneHeight(int32(info.PruneHeight))
+    }
+
     // Seed gauges from the loaded state so /metrics reflects reality during
     // the initial catch-up, not just after the first new block is indexed.
     metrics.ChainHeight.Set(float64(chainManager.GetCurrentHeight()))
@@ -246,17 +251,38 @@ func main() {
         cancel()
     }()
 
+    log.Println("⏳ Catching up with blockchain...")
+    if err := chainManager.CatchUpToTip(); errors.Is(err, indexer.ErrPrunedGap) {
+        log.Println()
+        log.Println("❌ " + err.Error())
+        log.Println()
+        log.Println("   The index database has fallen behind bitcoind's prune window.")
+        log.Println("   Blocks in this range have been pruned and cannot be indexed.")
+        log.Println("   The Electrum server will NOT accept client connections.")
+        log.Println()
+        log.Printf("   To fix: delete the index database and restart the service.")
+        log.Printf("   The server will re-anchor at the current chain tip.")
+        log.Println()
+        log.Println("     sudo systemctl stop electrum-go")
+        log.Printf("     sudo rm -rf %s", cfg.Storage.DBPath)
+        log.Println("     sudo systemctl start electrum-go")
+        log.Println()
+        log.Println("⏸️  Waiting for operator intervention (send SIGTERM to stop)...")
+
+        // Block until signalled — don't crash-loop, don't serve clients.
+        <-ctx.Done()
+        log.Println("🛑 Shutting down...")
+        return
+    } else if err != nil {
+        log.Fatalf("❌ Catch-up failed: %v", err)
+    }
+
     go func() {
         if err := electrumServer.Start(); err != nil {
             log.Printf("❌ Electrum server error: %v", err)
             cancel()
         }
     }()
-
-    log.Println("⏳ Catching up with blockchain...")
-    if err := chainManager.CatchUpToTip(); err != nil {
-        log.Fatalf("❌ Catch-up failed: %v", err)
-    }
 
     if err := zmqSub.Start(); err != nil {
         log.Fatalf("❌ Failed to start ZMQ: %v", err)

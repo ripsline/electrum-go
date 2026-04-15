@@ -85,11 +85,26 @@ func main() {
     }
     defer client.Shutdown()
 
+    // ctx + signal handler set up early so waitForIBD below can be
+    // SIGTERM-cancelled if the operator gives up waiting for bitcoind.
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+    go func() {
+        sig := <-sigChan
+        log.Printf("\n🛑 Received signal %v, shutting down...", sig)
+        cancel()
+    }()
+
     info, err := getBlockchainInfo(client)
     if err != nil {
         log.Fatalf("❌ Failed to get blockchain info: %v", err)
     }
 
+    // Bring the metrics endpoint up before the IBD wait so operators
+    // can scrape during a long wait if they want to.
     if cfg.Metrics.Enabled {
         metrics.Init(info.Chain, Version, GitCommit)
         go func() {
@@ -115,10 +130,13 @@ func main() {
     }
     log.Println()
 
-    if info.VerificationProgress < 0.9999 {
-        log.Println("⚠️  WARNING: Bitcoin Core is still syncing!")
-        log.Println("   Indexing will proceed but may encounter issues.")
-        log.Println()
+    info, err = waitForIBD(ctx, client, info)
+    if err != nil {
+        if errors.Is(err, context.Canceled) {
+            log.Println("🛑 Shutting down before IBD complete")
+            return
+        }
+        log.Fatalf("❌ IBD wait failed: %v", err)
     }
 
     mempool := indexer.NewMempoolOverlay(db)
@@ -181,21 +199,9 @@ func main() {
 
     electrumServer := electrum.NewServer(cfg, db, client, mempool)
 
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
-
     if cfg.Metrics.Enabled {
         metrics.StartDBSizeSampler(ctx, cfg.Storage.DBPath, 60*time.Second)
     }
-
-    sigChan := make(chan os.Signal, 1)
-    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-    go func() {
-        sig := <-sigChan
-        log.Printf("\n🛑 Received signal %v, shutting down...", sig)
-        cancel()
-    }()
 
     log.Println("⏳ Catching up with blockchain...")
     if err := chainManager.CatchUpToTip(); errors.Is(err, indexer.ErrPrunedGap) {

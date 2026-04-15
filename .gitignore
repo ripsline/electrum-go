@@ -23,4 +23,5 @@ config.toml.bak
 .DS_Store
 
 # Session roadmaps (not for commit — handoff notes between Claude Code sessions)
+.roadmap.md
 .roadmap-*.md

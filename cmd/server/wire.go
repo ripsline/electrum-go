@@ -1,6 +1,7 @@
 package main
 
 import (
+    "context"
     "encoding/json"
     "fmt"
     "log"
@@ -11,6 +12,24 @@ import (
 
     "github.com/ripsline/electrum-go/internal/config"
     "github.com/ripsline/electrum-go/internal/metrics"
+)
+
+// ibdMinProgress is bitcoind's verificationprogress threshold above which
+// we consider IBD complete. 0.9999 ≈ within ~50 blocks of tip on mainnet.
+const ibdMinProgress = 0.9999
+
+// ibdPollInterval is how often we re-check verificationprogress while
+// waiting for IBD. Cheap RPC, no need to be aggressive.
+const ibdPollInterval = 30 * time.Second
+
+// IBD log throttling: poll cadence is fine for completion detection
+// but logging every tick produces ~2880 lines/day for a long IBD.
+// Log only when progress moves by ibdLogProgressDelta or when
+// ibdLogMaxInterval has elapsed since the last log line — whichever
+// fires first.
+const (
+    ibdLogProgressDelta = 0.001 // 0.1%
+    ibdLogMaxInterval   = 10 * time.Minute
 )
 
 type BlockchainInfo struct {
@@ -151,6 +170,64 @@ func connectToBitcoinCore(cfg *config.Config) (*rpcclient.Client, error) {
     }
 
     return client, nil
+}
+
+// waitForIBD blocks until bitcoind reports IBD complete, polling every
+// ibdPollInterval. Returns the latest BlockchainInfo so callers see
+// fresh prune height and tip after the wait. Returns ctx.Err() if
+// cancelled.
+//
+// Why gate on this: on a pruned node, indexing while bitcoind is still
+// in IBD races the prune window. The indexer can fall behind block
+// processing and trip the pruned-gap halt. Waiting here closes the
+// most common entry path to that state.
+func waitForIBD(ctx context.Context, client *rpcclient.Client,
+    info *BlockchainInfo) (*BlockchainInfo, error) {
+
+    if info.VerificationProgress >= ibdMinProgress {
+        return info, nil
+    }
+
+    log.Println("⏳ Waiting for bitcoind initial block download...")
+    log.Printf("   Current: %.4f%% (need ≥ %.4f%%, blocks %d / headers %d)",
+        info.VerificationProgress*100, ibdMinProgress*100,
+        info.Blocks, info.Headers)
+    log.Println("   Indexing during IBD on a pruned node risks the prune")
+    log.Println("   window overtaking the indexer. Polling every 30s.")
+    log.Println()
+
+    ticker := time.NewTicker(ibdPollInterval)
+    defer ticker.Stop()
+
+    lastLoggedProgress := info.VerificationProgress
+    lastLoggedAt := time.Now()
+
+    for {
+        select {
+        case <-ctx.Done():
+            return nil, ctx.Err()
+        case <-ticker.C:
+            updated, err := getBlockchainInfo(client)
+            if err != nil {
+                log.Printf("⚠️  IBD progress check failed: %v (will retry)", err)
+                continue
+            }
+            if updated.VerificationProgress >= ibdMinProgress {
+                log.Println("✅ bitcoind IBD complete; proceeding with indexing")
+                log.Println()
+                return updated, nil
+            }
+            progressDelta := updated.VerificationProgress - lastLoggedProgress
+            if progressDelta >= ibdLogProgressDelta ||
+                time.Since(lastLoggedAt) >= ibdLogMaxInterval {
+                log.Printf("⏳ IBD: %.4f%% (blocks %d / headers %d)",
+                    updated.VerificationProgress*100,
+                    updated.Blocks, updated.Headers)
+                lastLoggedProgress = updated.VerificationProgress
+                lastLoggedAt = time.Now()
+            }
+        }
+    }
 }
 
 func determineStartHeight(cfg *config.Config, info *BlockchainInfo) int32 {

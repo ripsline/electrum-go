@@ -253,22 +253,7 @@ func main() {
 
     log.Println("⏳ Catching up with blockchain...")
     if err := chainManager.CatchUpToTip(); errors.Is(err, indexer.ErrPrunedGap) {
-        log.Println()
-        log.Println("❌ " + err.Error())
-        log.Println()
-        log.Println("   The index database has fallen behind bitcoind's prune window.")
-        log.Println("   Blocks in this range have been pruned and cannot be indexed.")
-        log.Println("   The Electrum server will NOT accept client connections.")
-        log.Println()
-        log.Printf("   To fix: delete the index database and restart the service.")
-        log.Printf("   The server will re-anchor at the current chain tip.")
-        log.Println()
-        log.Println("     sudo systemctl stop electrum-go")
-        log.Printf("     sudo rm -rf %s", cfg.Storage.DBPath)
-        log.Println("     sudo systemctl start electrum-go")
-        log.Println()
-        log.Println("⏸️  Waiting for operator intervention (send SIGTERM to stop)...")
-
+        logPrunedGapRecovery(err, cfg.Storage.DBPath)
         // Block until signalled — don't crash-loop, don't serve clients.
         <-ctx.Done()
         log.Println("🛑 Shutting down...")
@@ -289,8 +274,8 @@ func main() {
     }
 
     log.Println("🔄 Starting live processing...")
-    runMainLoop(ctx, cfg, writer, zmqSub, electrumServer, chainManager, client,
-        mempool)
+    loopErr := runMainLoop(ctx, cfg, writer, zmqSub, electrumServer, chainManager,
+        client, mempool)
 
     log.Println("🛑 Shutting down...")
 
@@ -298,7 +283,31 @@ func main() {
         log.Printf("⚠️  Error stopping Electrum server: %v", err)
     }
 
+    if errors.Is(loopErr, indexer.ErrPrunedGap) {
+        logPrunedGapRecovery(loopErr, cfg.Storage.DBPath)
+        // Block until signalled — don't crash-loop, don't serve clients.
+        <-ctx.Done()
+    }
+
     log.Println("✅ Shutdown complete")
+}
+
+func logPrunedGapRecovery(err error, dbPath string) {
+    log.Println()
+    log.Println("❌ " + err.Error())
+    log.Println()
+    log.Println("   The index database has fallen behind bitcoind's prune window.")
+    log.Println("   Blocks in this range have been pruned and cannot be indexed.")
+    log.Println("   The Electrum server will NOT accept client connections.")
+    log.Println()
+    log.Printf("   To fix: delete the index database and restart the service.")
+    log.Printf("   The server will re-anchor at the current chain tip.")
+    log.Println()
+    log.Println("     sudo systemctl stop electrum-go")
+    log.Printf("     sudo rm -rf %s", dbPath)
+    log.Println("     sudo systemctl start electrum-go")
+    log.Println()
+    log.Println("⏸️  Waiting for operator intervention (send SIGTERM to stop)...")
 }
 
 func printBanner() {
@@ -492,7 +501,7 @@ func runMainLoop(
     chainManager *indexer.ChainManager,
     rpcClient *rpcclient.Client,
     mempool *indexer.MempoolOverlay,
-) {
+) error {
     pruneTicker := time.NewTicker(time.Duration(cfg.Indexer.UndoPruneInterval) *
         time.Minute)
     defer pruneTicker.Stop()
@@ -515,11 +524,11 @@ func runMainLoop(
         select {
         case <-ctx.Done():
             log.Println("📍 Main loop exiting...")
-            return
+            return nil
 
         case block, ok := <-zmqSub.BlockChan():
             if !ok {
-                return
+                return nil
             }
             height, affected, err := writer.IndexBlock(block)
             if err != nil {
@@ -527,7 +536,11 @@ func runMainLoop(
 
                 if isReorgError(err) {
                     log.Println("🔄 Reorg detected, catching up to tip...")
-                    if catchUpErr := chainManager.CatchUpToTip(); catchUpErr != nil {
+                    catchUpErr := chainManager.CatchUpToTip()
+                    if errors.Is(catchUpErr, indexer.ErrPrunedGap) {
+                        return catchUpErr
+                    }
+                    if catchUpErr != nil {
                         log.Printf("⚠️  Catch-up after reorg failed: %v", catchUpErr)
                     } else {
                         log.Println("✅ Catch-up after reorg complete")
@@ -560,7 +573,7 @@ func runMainLoop(
 
         case tx, ok := <-zmqSub.TxChan():
             if !ok {
-                return
+                return nil
             }
             affected, err := writer.IndexMempoolTx(tx)
             if err == nil {
@@ -575,12 +588,16 @@ func runMainLoop(
 
         case gap, ok := <-zmqSub.GapChan():
             if !ok {
-                return
+                return nil
             }
             if gap.Stream == "block" {
                 log.Printf("⚠️  ZMQ block sequence gap detected: expected %d, got %d",
                     gap.Expected, gap.Got)
-                if err := chainManager.CatchUpToTip(); err != nil {
+                err := chainManager.CatchUpToTip()
+                if errors.Is(err, indexer.ErrPrunedGap) {
+                    return err
+                }
+                if err != nil {
                     log.Printf("⚠️  Catch-up after ZMQ gap failed: %v", err)
                 }
             } else if gap.Stream == "tx" {
@@ -612,7 +629,11 @@ func runMainLoop(
                 log.Printf("🔄 ZMQ safety check: missed %d block(s), "+
                     "catching up (%d -> %d)",
                     missedBlocks, currentHeight, coreTip)
-                if err := chainManager.CatchUpToTip(); err != nil {
+                err := chainManager.CatchUpToTip()
+                if errors.Is(err, indexer.ErrPrunedGap) {
+                    return err
+                }
+                if err != nil {
                     log.Printf("⚠️  Catch-up after missed ZMQ failed: %v", err)
                 } else {
                     log.Printf("✅ Caught up to tip %d", coreTip)

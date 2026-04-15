@@ -2,10 +2,7 @@
 package main
 
 import (
-    "bytes"
     "context"
-    "encoding/hex"
-    "encoding/json"
     "errors"
     "flag"
     "fmt"
@@ -15,10 +12,6 @@ import (
     "syscall"
     "time"
 
-    "github.com/btcsuite/btcd/chaincfg/chainhash"
-    "github.com/btcsuite/btcd/rpcclient"
-
-    "github.com/ripsline/electrum-go/internal/config"
     "github.com/ripsline/electrum-go/internal/electrum"
     "github.com/ripsline/electrum-go/internal/indexer"
     "github.com/ripsline/electrum-go/internal/metrics"
@@ -30,51 +23,6 @@ var (
     GitCommit = "unknown"
     BuildTime = "unknown"
 )
-
-type BlockchainInfo struct {
-    Chain                string   `json:"chain"`
-    Blocks               int64    `json:"blocks"`
-    Headers              int64    `json:"headers"`
-    BestBlockHash        string   `json:"bestblockhash"`
-    Difficulty           float64  `json:"difficulty"`
-    Time                 int64    `json:"time"`
-    MedianTime           int64    `json:"mediantime"`
-    VerificationProgress float64  `json:"verificationprogress"`
-    InitialBlockDownload bool     `json:"initialblockdownload"`
-    ChainWork            string   `json:"chainwork"`
-    SizeOnDisk           int64    `json:"size_on_disk"`
-    Pruned               bool     `json:"pruned"`
-    PruneHeight          int64    `json:"pruneheight,omitempty"`
-    AutomaticPruning     bool     `json:"automatic_pruning,omitempty"`
-    PruneTargetSize      int64    `json:"prune_target_size,omitempty"`
-    Warnings             []string `json:"warnings"`
-}
-
-func getBlockchainInfo(client *rpcclient.Client) (*BlockchainInfo, error) {
-    rpcStart := time.Now()
-    result, err := client.RawRequest("getblockchaininfo", nil)
-    metrics.ObserveBitcoinRPC("getblockchaininfo", rpcStart, err)
-    if err != nil {
-        return nil, fmt.Errorf("getblockchaininfo RPC failed: %w", err)
-    }
-
-    var info BlockchainInfo
-    if err := json.Unmarshal(result, &info); err != nil {
-        var legacyInfo struct {
-            BlockchainInfo
-            Warnings string `json:"warnings"`
-        }
-        if err2 := json.Unmarshal(result, &legacyInfo); err2 != nil {
-            return nil, fmt.Errorf("failed to parse getblockchaininfo: %w", err)
-        }
-        info = legacyInfo.BlockchainInfo
-        if legacyInfo.Warnings != "" {
-            info.Warnings = []string{legacyInfo.Warnings}
-        }
-    }
-
-    return &info, nil
-}
 
 func main() {
     configFile := flag.String("config", "", "Path to config file (TOML)")
@@ -196,7 +144,6 @@ func main() {
     metrics.BitcoinCoreHeight.Set(float64(info.Blocks))
     metrics.MempoolTxCount.Set(float64(mempool.Count()))
 
-    // Forward-indexing empty state check
     checkpoint, _ := db.LoadCheckpoint()
     if checkpoint.Height == 0 && checkpoint.BlockHash == "" {
         startFrom := determineStartHeight(cfg, info)
@@ -210,7 +157,6 @@ func main() {
     writer := indexer.NewWriter(db, chainManager, mempool)
     defer writer.Close()
 
-    // Full mempool sync on startup, including backfill of missed txs
     if _, err := reconcileMempool(client, mempool, writer); err != nil {
         log.Printf("⚠️  Mempool reconciliation failed: %v", err)
     }
@@ -253,9 +199,7 @@ func main() {
 
     log.Println("⏳ Catching up with blockchain...")
     if err := chainManager.CatchUpToTip(); errors.Is(err, indexer.ErrPrunedGap) {
-        logPrunedGapRecovery(err, cfg.Storage.DBPath)
-        // Block until signalled — don't crash-loop, don't serve clients.
-        <-ctx.Done()
+        haltForOperator(ctx, err, cfg.Storage.DBPath)
         log.Println("🛑 Shutting down...")
         return
     } else if err != nil {
@@ -284,423 +228,8 @@ func main() {
     }
 
     if errors.Is(loopErr, indexer.ErrPrunedGap) {
-        logPrunedGapRecovery(loopErr, cfg.Storage.DBPath)
-        // Block until signalled — don't crash-loop, don't serve clients.
-        <-ctx.Done()
+        haltForOperator(ctx, loopErr, cfg.Storage.DBPath)
     }
 
     log.Println("✅ Shutdown complete")
-}
-
-func logPrunedGapRecovery(err error, dbPath string) {
-    log.Println()
-    log.Println("❌ " + err.Error())
-    log.Println()
-    log.Println("   The index database has fallen behind bitcoind's prune window.")
-    log.Println("   Blocks in this range have been pruned and cannot be indexed.")
-    log.Println("   The Electrum server will NOT accept client connections.")
-    log.Println()
-    log.Printf("   To fix: delete the index database and restart the service.")
-    log.Printf("   The server will re-anchor at the current chain tip.")
-    log.Println()
-    log.Println("     sudo systemctl stop electrum-go")
-    log.Printf("     sudo rm -rf %s", dbPath)
-    log.Println("     sudo systemctl start electrum-go")
-    log.Println()
-    log.Println("⏸️  Waiting for operator intervention (send SIGTERM to stop)...")
-}
-
-func printBanner() {
-    log.Println("╔══════════════════════════════════════════════════════════════╗")
-    log.Println("║                     electrum-go Server                       ║")
-    log.Println("║         Forward-Indexing • Pruned Node Compatible            ║")
-    log.Println("╚══════════════════════════════════════════════════════════════╝")
-    log.Println()
-}
-
-func loadConfig(configFile string) (*config.Config, error) {
-    if configFile != "" {
-        return config.LoadFromFile(configFile)
-    }
-
-    defaultPaths := []string{
-        "config.toml",
-        "./config/config.toml",
-        "/etc/electrum-go/config.toml",
-    }
-
-    for _, path := range defaultPaths {
-        if _, err := os.Stat(path); err == nil {
-            log.Printf("📄 Loading config from %s", path)
-            return config.LoadFromFile(path)
-        }
-    }
-
-    log.Println("📄 No config file found, using defaults")
-    return config.DefaultConfig(), nil
-}
-
-func applyOverrides(cfg *config.Config, listen, rpcHost, rpcUser, rpcPass,
-    rpcCookie, dbPath string, startHeight int) {
-    if listen != "" {
-        cfg.Server.Listen = listen
-    }
-    if rpcHost != "" {
-        cfg.Bitcoin.RPCHost = rpcHost
-    }
-    if rpcCookie != "" {
-        cfg.Bitcoin.RPCCookiePath = rpcCookie
-        // Cookie auth wins over any user/pass carried from the config file.
-        cfg.Bitcoin.RPCUser = ""
-        cfg.Bitcoin.RPCPass = ""
-    }
-    if rpcUser != "" {
-        cfg.Bitcoin.RPCUser = rpcUser
-        cfg.Bitcoin.RPCCookiePath = ""
-    }
-    if rpcPass != "" {
-        cfg.Bitcoin.RPCPass = rpcPass
-        cfg.Bitcoin.RPCCookiePath = ""
-    }
-    if dbPath != "" {
-        cfg.Storage.DBPath = dbPath
-    }
-    if startHeight != -9999 {
-        cfg.Indexer.StartHeight = startHeight
-    }
-}
-
-func connectToBitcoinCore(cfg *config.Config) (*rpcclient.Client, error) {
-    user, pass := cfg.Bitcoin.RPCUser, cfg.Bitcoin.RPCPass
-    if cfg.Bitcoin.RPCCookiePath != "" {
-        // Read fresh on every connect so a bitcoind restart (which rotates
-        // the cookie) is picked up without stale credentials.
-        u, p, err := config.ReadRPCCookie(cfg.Bitcoin.RPCCookiePath)
-        if err != nil {
-            return nil, err
-        }
-        user, pass = u, p
-        log.Printf("🔐 Using RPC cookie auth from %s", cfg.Bitcoin.RPCCookiePath)
-    }
-
-    connCfg := &rpcclient.ConnConfig{
-        Host:         cfg.Bitcoin.RPCHost,
-        User:         user,
-        Pass:         pass,
-        HTTPPostMode: true,
-        DisableTLS:   true,
-    }
-
-    client, err := rpcclient.New(connCfg, nil)
-    if err != nil {
-        return nil, fmt.Errorf("failed to create RPC client: %w", err)
-    }
-
-    _, err = client.GetBlockCount()
-    if err != nil {
-        client.Shutdown()
-        return nil, fmt.Errorf("failed to connect: %w", err)
-    }
-
-    return client, nil
-}
-
-func determineStartHeight(cfg *config.Config, info *BlockchainInfo) int32 {
-    if cfg.Indexer.StartHeight == -1 {
-        log.Printf("📍 Forward-indexing mode: starting from current tip %d",
-            info.Blocks)
-        return int32(info.Blocks)
-    }
-
-    if cfg.Indexer.StartHeight == 0 {
-        log.Println("📍 Full indexing mode: starting from genesis")
-        return 0
-    }
-
-    if cfg.Indexer.StartHeight > 0 {
-        log.Printf("📍 Starting from specified height %d",
-            cfg.Indexer.StartHeight)
-        return int32(cfg.Indexer.StartHeight)
-    }
-
-    log.Printf("📍 Defaulting to forward-indexing from tip %d", info.Blocks)
-    return int32(info.Blocks)
-}
-
-// reconcileMempool removes stale entries and backfills any missing txs.
-func reconcileMempool(client *rpcclient.Client,
-    mempool *indexer.MempoolOverlay, writer *indexer.Writer) ([]string, error) {
-
-    txids, err := client.GetRawMempool()
-    if err != nil {
-        return nil, err
-    }
-
-    valid := make(map[string]bool, len(txids))
-    for _, h := range txids {
-        valid[h.String()] = true
-    }
-
-    removed, affected := mempool.ReconcileWith(valid)
-    if removed > 0 {
-        log.Printf("🔄 Mempool reconciled: removed %d stale entry(s)", removed)
-    }
-
-    affectedSet := make(map[string]struct{}, len(affected))
-    for _, sh := range affected {
-        affectedSet[sh] = struct{}{}
-    }
-
-    // Backfill missing mempool txs
-    missing := 0
-    for _, h := range txids {
-        txidHex := h.String()
-        if mempool.HasTx(txidHex) {
-            continue
-        }
-
-        hash, err := chainhash.NewHashFromStr(txidHex)
-        if err != nil {
-            continue
-        }
-
-        rawTx, err := client.GetRawTransaction(hash)
-        if err != nil {
-            continue
-        }
-
-        aff, err := writer.IndexMempoolTx(rawTx.MsgTx())
-        if err != nil {
-            continue
-        }
-
-        for _, sh := range aff {
-            affectedSet[sh] = struct{}{}
-        }
-        missing++
-    }
-
-    if missing > 0 {
-        log.Printf("🔄 Mempool backfill: added %d missing tx(s)", missing)
-    }
-
-    result := make([]string, 0, len(affectedSet))
-    for sh := range affectedSet {
-        result = append(result, sh)
-    }
-
-    return result, nil
-}
-
-func runMainLoop(
-    ctx context.Context,
-    cfg *config.Config,
-    writer *indexer.Writer,
-    zmqSub *indexer.ZMQSubscriber,
-    server *electrum.Server,
-    chainManager *indexer.ChainManager,
-    rpcClient *rpcclient.Client,
-    mempool *indexer.MempoolOverlay,
-) error {
-    pruneTicker := time.NewTicker(time.Duration(cfg.Indexer.UndoPruneInterval) *
-        time.Minute)
-    defer pruneTicker.Stop()
-
-    statsTicker := time.NewTicker(1 * time.Minute)
-    defer statsTicker.Stop()
-
-    reorgCheckTicker := time.NewTicker(30 * time.Second)
-    defer reorgCheckTicker.Stop()
-
-    mempoolReconTicker := time.NewTicker(5 * time.Minute)
-    defer mempoolReconTicker.Stop()
-
-    blocksProcessed := 0
-    txsIndexed := 0
-
-    log.Println("✅ Live processing active")
-
-    for {
-        select {
-        case <-ctx.Done():
-            log.Println("📍 Main loop exiting...")
-            return nil
-
-        case block, ok := <-zmqSub.BlockChan():
-            if !ok {
-                return nil
-            }
-            height, affected, err := writer.IndexBlock(block)
-            if err != nil {
-                log.Printf("⚠️  Block processing error: %v", err)
-
-                if isReorgError(err) {
-                    log.Println("🔄 Reorg detected, catching up to tip...")
-                    catchUpErr := chainManager.CatchUpToTip()
-                    if errors.Is(catchUpErr, indexer.ErrPrunedGap) {
-                        return catchUpErr
-                    }
-                    if catchUpErr != nil {
-                        log.Printf("⚠️  Catch-up after reorg failed: %v", catchUpErr)
-                    } else {
-                        log.Println("✅ Catch-up after reorg complete")
-                    }
-                }
-                continue
-            }
-
-            blocksProcessed++
-
-            var headerBuf bytes.Buffer
-            if err := block.Header.Serialize(&headerBuf); err != nil {
-                log.Printf("⚠️  Failed to serialize header: %v", err)
-                continue
-            }
-            headerHex := hex.EncodeToString(headerBuf.Bytes())
-
-            server.NotifyNewBlock(height, headerHex)
-
-            if len(affected) > 0 {
-                server.MarkScripthashDirtyMany(affected)
-                for _, shHex := range affected {
-                    server.NotifyScripthashStatusHex(shHex)
-                }
-            }
-
-            if blocksProcessed%cfg.Indexer.UndoPruneInterval == 0 {
-                writer.TriggerPrune()
-            }
-
-        case tx, ok := <-zmqSub.TxChan():
-            if !ok {
-                return nil
-            }
-            affected, err := writer.IndexMempoolTx(tx)
-            if err == nil {
-                txsIndexed++
-                if len(affected) > 0 {
-                    server.MarkScripthashDirtyMany(affected)
-                    for _, shHex := range affected {
-                        server.NotifyScripthashStatusHex(shHex)
-                    }
-                }
-            }
-
-        case gap, ok := <-zmqSub.GapChan():
-            if !ok {
-                return nil
-            }
-            if gap.Stream == "block" {
-                log.Printf("⚠️  ZMQ block sequence gap detected: expected %d, got %d",
-                    gap.Expected, gap.Got)
-                err := chainManager.CatchUpToTip()
-                if errors.Is(err, indexer.ErrPrunedGap) {
-                    return err
-                }
-                if err != nil {
-                    log.Printf("⚠️  Catch-up after ZMQ gap failed: %v", err)
-                }
-            } else if gap.Stream == "tx" {
-                log.Printf("⚠️  ZMQ tx sequence gap detected: expected %d, got %d",
-                    gap.Expected, gap.Got)
-                if _, err := reconcileMempool(rpcClient, mempool, writer); err != nil {
-                    log.Printf("⚠️  Mempool reconcile after ZMQ gap failed: %v", err)
-                }
-            }
-
-        case <-pruneTicker.C:
-            writer.TriggerPrune()
-
-        case <-reorgCheckTicker.C:
-            rpcStart := time.Now()
-            blockCount, err := rpcClient.GetBlockCount()
-            metrics.ObserveBitcoinRPC("getblockcount", rpcStart, err)
-            if err != nil {
-                log.Printf("⚠️  Periodic tip check RPC failed: %v", err)
-                continue
-            }
-
-            currentHeight := chainManager.GetCurrentHeight()
-            coreTip := int32(blockCount)
-            metrics.BitcoinCoreHeight.Set(float64(coreTip))
-
-            if coreTip > currentHeight {
-                missedBlocks := coreTip - currentHeight
-                log.Printf("🔄 ZMQ safety check: missed %d block(s), "+
-                    "catching up (%d -> %d)",
-                    missedBlocks, currentHeight, coreTip)
-                err := chainManager.CatchUpToTip()
-                if errors.Is(err, indexer.ErrPrunedGap) {
-                    return err
-                }
-                if err != nil {
-                    log.Printf("⚠️  Catch-up after missed ZMQ failed: %v", err)
-                } else {
-                    log.Printf("✅ Caught up to tip %d", coreTip)
-                }
-            }
-
-        case <-mempoolReconTicker.C:
-            affected, err := reconcileMempool(rpcClient, mempool, writer)
-            if err != nil {
-                log.Printf("⚠️  Periodic mempool reconcile failed: %v", err)
-                continue
-            }
-            if len(affected) > 0 {
-                server.MarkScripthashDirtyMany(affected)
-                for _, shHex := range affected {
-                    server.NotifyScripthashStatusHex(shHex)
-                }
-            }
-
-        case <-statsTicker.C:
-            writerStats := writer.Stats()
-            zmqStats := zmqSub.Stats()
-            connCount := server.GetActiveConnectionCount()
-            subScripthashes, subHeaders, subConns := server.
-                GetSubscriptionManager().GetTotalSubscriptions()
-
-            metrics.MempoolTxCount.Set(float64(mempool.Count()))
-            metrics.Subscriptions.WithLabelValues("scripthash").
-                Set(float64(subScripthashes))
-            metrics.Subscriptions.WithLabelValues("header").
-                Set(float64(subHeaders))
-            metrics.Subscriptions.WithLabelValues("conn").
-                Set(float64(subConns))
-
-            log.Printf("📊 Stats: height=%d, blocks=%d, "+
-                "mempool[rx=%d,idx=%d], conns=%d, "+
-                "subs=[sh:%d,hdr:%d,conn:%d]",
-                chainManager.GetCurrentHeight(),
-                writerStats.BlocksIndexed,
-                zmqStats.TxsReceived,
-                txsIndexed,
-                connCount,
-                subScripthashes, subHeaders, subConns)
-        }
-    }
-}
-
-func isReorgError(err error) bool {
-    if err == nil {
-        return false
-    }
-    errStr := err.Error()
-    return contains(errStr, "reorg") ||
-        contains(errStr, "does not connect") ||
-        contains(errStr, "gap detected") ||
-        contains(errStr, "rolled back")
-}
-
-func contains(s, substr string) bool {
-    return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-    for i := 0; i <= len(s)-len(substr); i++ {
-        if s[i:i+len(substr)] == substr {
-            return true
-        }
-    }
-    return false
 }
